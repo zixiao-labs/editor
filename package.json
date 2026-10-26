@@ -1,0 +1,28 @@
+{
+  "name": "@zixiao-labs/editor",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.15.0",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@12.15.0",
+  "type": "module",
+  "devDependencies": {
+    "@lightning-js/lightning": "^3.1.2",
+    "@nasti-toolchain/nasti": "^2.7.0",
+    "tsdown": "^0.23.2",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
+    "typescript": "^7.0.2"
+  }
+}
