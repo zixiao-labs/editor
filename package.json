@@ -2,9 +2,22 @@
   "name": "@zixiao-labs/editor",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "lightning run tests/crdt tests/unit",
+    "test:crdt": "lightning run tests/crdt",
+    "test:types": "lightning run --typecheck --tsconfig tsconfig.json tests/types",
+    "test:consumer": "tsc --noEmit -p tests/consumer/tsconfig.json && lightning run tests/consumer",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.build.json",
+    "build": "tsdown src/index.ts --format esm --platform neutral --target es2022 --dts --tsconfig tsconfig.build.json"
   },
   "keywords": [],
   "author": "",
