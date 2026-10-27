@@ -1,6 +1,6 @@
 # Editor 分阶段实施计划
 
-状态：G0 规格与独立验证设计已完成，G1 核心/协作类型与工具骨架已建立，生产 CRDT 尚未开始。当前实测与剩余事项见 [实施记录](./editor-progress.md)。基于 [已锁定 API](./editor-api.md)，不把下面的验收项当作已有测试结果。
+状态：G0 规格与独立验证设计已完成，G1 工具/核心/协作/集成类型及入口门禁已通过，生产 CRDT 尚未开始。当前实测、后续依赖审查与剩余事项见 [实施记录](./editor-progress.md)。基于 [已锁定 API](./editor-api.md)，不把下面的验收项当作已有测试结果。
 
 ## 1. 工作流、基线与阶段边界
 
@@ -196,7 +196,7 @@ tsdown 输出 ESM/declarations，检查公开 exports、资产 lazy load、tree 
 
 ## 12. 验证命令约定与当前结果
 
-下面是 G1 要建立的**脚本契约**，不是声称当前 manifest 已有这些脚本。内部 CLI 参数必须核查锁定版本文档后实现，不凭记忆拼 flags。
+下面是分阶段建立的**脚本契约**，不是声称当前 manifest 已有所有脚本；`test:browser`、`test:lsp`、`playground:dev` 仍未实现。内部 CLI 参数必须核查锁定版本文档后实现，不凭记忆拼 flags。
 
 ```sh
 pnpm --version
@@ -215,4 +215,4 @@ pnpm playground:dev
 
 **原设计线程当时的结果**：只做文档设计/计划和结构、链接、空白检查；未运行以上实现期命令，未新增生产依赖，未编译文档示例。
 
-**续接结果**：已完成 [G0 算法规格](./editor-crdt-design.md) 和可运行规格检查器，并建立 G1 核心/协作类型、Lightning、tsdown 与 ES-only consumer 门禁。完整证据和未完成项见 [实施记录](./editor-progress.md)，不把测试小模型当作生产内核。
+**续接结果**：已完成 [G0 算法规格](./editor-crdt-design.md) 和可运行规格检查器，并建立 G1 核心/协作/[集成类型](./editor-integration-contracts.md)、Lightning、tsdown 七入口、无 DOM/DOM consumer 与锁定文档签名门禁。下一项为 P2 测试优先实现。完整证据和未完成项见 [实施记录](./editor-progress.md)，不把测试小模型当作生产内核，也不把类型当作已实现的集成。

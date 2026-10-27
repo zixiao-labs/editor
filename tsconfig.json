@@ -13,5 +13,8 @@
     "noEmit": true
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"],
-  "exclude": ["tests/consumer"]
+  "exclude": [
+    "tests/consumer", "tests/types/browser.test-d.ts",
+    "src/browser.ts", "src/vgpu.ts", "src/contracts/browser.ts", "src/contracts/vgpu.ts"
+  ]
 }

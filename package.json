@@ -8,16 +8,41 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./collaboration": {
+      "types": "./dist/collaboration.d.ts",
+      "import": "./dist/collaboration.js"
+    },
+    "./languages": {
+      "types": "./dist/languages.d.ts",
+      "import": "./dist/languages.js"
+    },
+    "./lsp": {
+      "types": "./dist/lsp.d.ts",
+      "import": "./dist/lsp.js"
+    },
+    "./shaping": {
+      "types": "./dist/shaping.d.ts",
+      "import": "./dist/shaping.js"
+    },
+    "./vgpu": {
+      "types": "./dist/vgpu.d.ts",
+      "import": "./dist/vgpu.js"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js"
     }
   },
   "files": ["dist"],
   "scripts": {
     "test": "lightning run tests/crdt tests/unit",
     "test:crdt": "lightning run tests/crdt",
-    "test:types": "lightning run --typecheck --tsconfig tsconfig.json tests/types",
-    "test:consumer": "tsc --noEmit -p tests/consumer/tsconfig.json && lightning run tests/consumer",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.build.json",
-    "build": "tsdown src/index.ts --format esm --platform neutral --target es2022 --dts --tsconfig tsconfig.build.json"
+    "test:types": "lightning run --typecheck --tsconfig tsconfig.json tests/types/core.test-d.ts tests/types/integrations.test-d.ts && lightning run --typecheck --tsconfig tsconfig.browser.json tests/types/browser.test-d.ts",
+    "test:consumer": "tsc --noEmit -p tests/consumer/tsconfig.json && tsc --noEmit -p tests/consumer/tsconfig.browser.json && lightning run tests/consumer",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.browser.json && tsc --noEmit -p tsconfig.build.json",
+    "build": "tsdown src/index.ts src/collaboration.ts src/languages.ts src/lsp.ts src/shaping.ts src/vgpu.ts src/browser.ts --root src --format esm --platform neutral --target es2022 --dts --tsconfig tsconfig.build.json",
+    "measure:package": "node scripts/measure-package.mjs"
   },
   "keywords": [],
   "author": "",

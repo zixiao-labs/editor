@@ -38,11 +38,36 @@ shaper/rasterizer、IBM Plex Mono 资产、可选连字字体及真实 TypeScrip
 vgpu 依项目 skill：无既定版本才选稳定 latest，然后只按准确实装版本的本地 docs
 开发。默认 Plex 不变；可选连字字体只作明确 opt-in，仍需许可审查。
 
+G1 本轮只增加本库的 type-only 集成契约，没有运行第三方适配器。
+因此不为查文档而提前选择/安装上述依赖；它们的审查与能力门禁仍在 P5/P6。
+tsdown 多入口查询使用 Context7 `/rolldown/tsdown`，并用本地 0.23.2 `--help`
+核对 `files`、`--root`、`--dts` 等实际参数；没有使用会重写 exports 的自动生成选项。
+直接 `npx ctx7@latest` 被项目的 pnpm devEngines 拒绝，改用临时 `pnpm dlx ctx7@latest`；
+它仍报告子进程 pnpm 12.3.4，不作为本项目验证环境。项目安装/构建/测试均为 12.15.0。
+
 ## 包体门禁
 
 当前 G1 基础入口基线由 `pnpm build` 输出测量；它只有身份/错误运行时，
 不能代表未来完整 CRDT/Diff 包体。root 不得静态引入 parser/font/WASM/GPU/playground。
 为后续 P2–P4 设置 root ESM **128 KiB gzip 报警预算**，超出需说明实测原因及取舍，
 不得截断代码。可选入口与资产预算在选择各依赖时建立，不伪造尚无产物的数字。
-当前实测 root JS 为 1,949 bytes / 802 gzip bytes，声明为 21,278 / 4,839 bytes。
-consumer 检查包含 root gzip 报警预算；产物与 `.context` 不提交。
+
+`pnpm build && pnpm measure:package` 可重测下表。JS 是该入口文件大小；
+声明闭包沿产物中的相对 import/re-export 递归去重，gzip 是闭包各文件单独压缩后求和，
+不同入口之间共享 chunk 不相加为“总包体”。不依赖不稳定的生成 chunk 名称。
+
+| 入口 | JS bytes / gzip | 声明闭包 bytes / gzip |
+| --- | --- | --- |
+| root | 1,949 / 802 | 26,947 / 7,123 |
+| `/collaboration` | 0 / 20 | 23,051 / 6,000 |
+| `/languages` | 0 / 20 | 21,925 / 5,676 |
+| `/lsp` | 0 / 20 | 25,053 / 6,355 |
+| `/shaping` | 0 / 20 | 23,577 / 6,153 |
+| `/vgpu` | 0 / 20 | 27,014 / 7,308 |
+| `/browser` | 0 / 20 | 23,713 / 6,242 |
+
+对比上一轮 root JS 仍是 1,949 / 802，未增加运行时；
+上一轮单入口声明 21,278 / 4,839 与现在拆分后的入口文件大小不可直接比较。
+空文件 gzip 20 bytes 是压缩格式开销，不是实际适配器。
+consumer 检查包含 root gzip 预算与六个子入口无运行时导出的门禁；
+产物与 `.context` 不提交。未来实现各适配器时才替换相应零运行时门禁并制定真实预算。
