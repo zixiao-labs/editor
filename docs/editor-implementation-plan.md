@@ -1,6 +1,6 @@
 # Editor 分阶段实施计划
 
-状态：G0 规格与独立验证设计已完成，G1 工具/核心/协作/集成类型及入口门禁已通过，生产 CRDT 尚未开始。当前实测、后续依赖审查与剩余事项见 [实施记录](./editor-progress.md)。基于 [已锁定 API](./editor-api.md)，不把下面的验收项当作已有测试结果。
+状态：G0 规格与独立验证设计已完成，G1 工具/核心/协作/集成类型及入口门禁已通过。P2 已完成内部源快照/坐标/稳定位置层，生产 CRDT、历史 store、heads 与 codec 仍待实现。当前实测、后续依赖审查与剩余事项见 [实施记录](./editor-progress.md)。基于 [已锁定 API](./editor-api.md)，不把下面的验收项当作已有测试结果。
 
 ## 1. 工作流、基线与阶段边界
 
@@ -93,6 +93,11 @@ vgpu 安装进入范围时按 skill：先看 manifest/lock/本地 binary；无�
 ## 5. P2：源快照、坐标与原生历史
 
 先写测试，再实现选定算法和数据结构；生产可以用 chunk/run 索引，oracle 保持简单独立。
+
+已完成第一块内部实现：不可变 materialization 视图、三种单位的坐标索引、
+source snapshot 句柄、guard/affinity 位置解算与转换。其输入仍需由未来 history 层
+验证因果闭包、root/revision 身份、完整排序与可见性。位置差分不等于生产 CRDT 验收，
+内部快照也不等于已提供 `createHistoryStore`；下列整体交付与退出条件仍未满足。
 
 交付：
 

@@ -45,6 +45,11 @@ tsdown 多入口查询使用 Context7 `/rolldown/tsdown`，并用本地 0.23.2 `
 直接 `npx ctx7@latest` 被项目的 pnpm devEngines 拒绝，改用临时 `pnpm dlx ctx7@latest`；
 它仍报告子进程 pnpm 12.3.4，不作为本项目验证环境。项目安装/构建/测试均为 12.15.0。
 
+P2 源快照/坐标/位置层也未新增依赖，没有 DOM、`TextEncoder` 或 Node API。
+测试的独立 UTF-8 对照使用标准 `encodeURIComponent` 编码 Unicode 前缀。
+本轮 Context7 查询仍只命中电视 UI 的同名包，继续以本地 Lightning 3.1.2
+README/manifest 核查测试用法；没有使用不相关文档，也没有修改项目工具版本。
+
 ## 包体门禁
 
 当前 G1 基础入口基线由 `pnpm build` 输出测量；它只有身份/错误运行时，
@@ -71,3 +76,6 @@ tsdown 多入口查询使用 Context7 `/rolldown/tsdown`，并用本地 0.23.2 `
 空文件 gzip 20 bytes 是压缩格式开销，不是实际适配器。
 consumer 检查包含 root gzip 预算与六个子入口无运行时导出的门禁；
 产物与 `.context` 不提交。未来实现各适配器时才替换相应零运行时门禁并制定真实预算。
+
+P2 内部源视图尚未接入公开入口。本轮重新 build/测量的七入口数值与上表一致，
+不是新坐标/位置实现或完整 P2 运行时的包体测量。

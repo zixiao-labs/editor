@@ -4,8 +4,10 @@
 `HistoryStore → EditingHead → EditorSession` 分层。
 
 **当前不是可用的编辑器。** 已有 API 契约、CRDT 算法规格、独立规格检查器、
-核心/协作/集成类型契约，以及身份构造器和错误类型。生产历史内核、会话、MultiBuffer、
-同步、Diff、语言服务、字体塑形、GPU 视图和 playground 尚未实现。
+核心/协作/集成类型契约，以及身份构造器和错误类型。P2 已开始，内部源快照、
+三种单位的坐标索引和稳定位置解算已实现；尚未接入生产 CRDT/历史 store。
+生产事务、隔离 heads、codec、会话、MultiBuffer、同步、Diff、语言服务、
+字体塑形、GPU 视图和 playground 尚未实现。
 不会用抛 `not implemented` 的假工厂冒充运行时。
 
 ## 当前可运行的导出
@@ -52,6 +54,12 @@ Lightning 是测试框架；Nasti 不用于生产打包。tsdown 以
 CRDT 检查器在 `tests/crdt`，不在生产包中。包括三副本离线/重连、完整依赖、
 快照、Unicode、位置、undo effects、独立枚举 oracle 和负对照。
 这些通过不代表真实生产内核已经通过，也不代表形式证明。
+
+P2 的内部源视图在 `src/model`、坐标索引在 `src/coordinates`。它们消费已验证的
+全序/可见性，不建立因果历史、不校验 root/revision digest；未知历史必须由后续
+history 层拒绝。位置差分用独立 oracle 提供全序、规格模型提供可见性与期望解算，
+只验证生产位置/坐标层。内部模块尚未接入包入口，不能通过包名调用，
+也不能把公开产物体积未变当作完整 P2 的包体结果。
 
 ## 设计与进度
 
