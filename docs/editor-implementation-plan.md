@@ -1,6 +1,6 @@
 # Editor 分阶段实施计划
 
-状态：G0 规格与独立验证设计已完成，G1 工具/核心/协作/集成类型及入口门禁已通过。P2 已完成内部源快照/坐标/稳定位置层，生产 CRDT、历史 store、heads 与 codec 仍待实现。当前实测、后续依赖审查与剩余事项见 [实施记录](./editor-progress.md)。基于 [已锁定 API](./editor-api.md)，不把下面的验收项当作已有测试结果。
+状态：G0 规格与独立验证设计已完成，G1 工具/核心/协作/集成类型及入口门禁已通过。P2 已有内部源视图、FugueMax 持久索引、store/head 编排和多文档原子 group，包含闭包/域校验与 typed 传递；公共历史 store、undo 控制与 wire codec 仍待完成。当前实测、后续依赖审查与剩余事项见 [实施记录](./editor-progress.md)。基于 [已锁定 API](./editor-api.md)，不把下面的验收项当作已有测试结果。
 
 ## 1. 工作流、基线与阶段边界
 
@@ -95,9 +95,23 @@ vgpu 安装进入范围时按 skill：先看 manifest/lock/本地 binary；无�
 先写测试，再实现选定算法和数据结构；生产可以用 chunk/run 索引，oracle 保持简单独立。
 
 已完成第一块内部实现：不可变 materialization 视图、三种单位的坐标索引、
-source snapshot 句柄、guard/affinity 位置解算与转换。其输入仍需由未来 history 层
-验证因果闭包、root/revision 身份、完整排序与可见性。位置差分不等于生产 CRDT 验收，
-内部快照也不等于已提供 `createHistoryStore`；下列整体交付与退出条件仍未满足。
+source snapshot 句柄、guard/affinity 位置解算与转换。第二块已实现规范 root/revision、
+writer stream、同 base 批量替换、FugueMax 墓碑排序、typed 因果接受与单文档物化，
+并与规格模型/独立 oracle 差分；源视图的已验证输入现在可由真实历史层供应。
+第三块已实现内部文档登记、writer 所有权、不可变版本集、隔离 heads/CAS/ABA、
+精确 merge/checkout、历史/位置/provenance 查询及微任务事件/资源借用。
+head 可持有多个固定成员；多文档 commit 现在经 manifest 与整体暂存统一发布。
+按用户要求，先于 group 补齐文本存储基础：持久化多路 B+ SumTree、summary/dimension
+cursor、chunked rope 已接入实际写入与坐标/快照，并检查结构共享和不变量；
+随后已接入 CRDT 全序/可见性 chunk 索引、身份/子树边界定位与 revision delta 物化，
+连续 forward run 与观察删除按批更新，native snapshot 共享索引，不再重放整张身份图。
+因果闭包/拓扑排序、历史 Map 浅复制和 rope 等值扫描仍需后续性能工作；
+不把这些成本掩盖在 rope primitive 的复杂度后面。多文档 group/闭包/域边界及 typed
+完整/delta 传递也已接通，包含跨组环与 before 一致性检查、精确缺成员报告和独立差分。
+这不是安全 codec 或公共 `createHistoryStore`，尚无生产 undo 控制、pending 与 pin/
+位置导出。下一项补 group 效果活性寄存器，之后继续 codec/defer/retention。
+公共工厂还受 P4 `HistoryStore.diff` 的完整契约约束，不导出缺方法工厂
+绕过公共验收目标；下列整体交付与退出条件仍未满足。
 
 交付：
 

@@ -50,6 +50,14 @@ P2 源快照/坐标/位置层也未新增依赖，没有 DOM、`TextEncoder` 或
 本轮 Context7 查询仍只命中电视 UI 的同名包，继续以本地 Lightning 3.1.2
 README/manifest 核查测试用法；没有使用不相关文档，也没有修改项目工具版本。
 
+P2 单文档事务内核仍无新增依赖。为保持同步注册与 ES-only 边界，按
+[FIPS 180-4](https://doi.org/10.6028/NIST.FIPS.180-4) 实现同步 SHA-256，
+标准向量与独立 Node `crypto` 计算的 framing golden 用于验证。
+Node `crypto` 只在独立测试数据生成命令中使用，不进入源码或产物。
+本轮 `pnpm dlx ctx7@latest` 已找到正确的 `/zixiao-labs/lightning`，
+核查 matcher/run 用法并与本地实装 3.1.2 README 对照；不把索引的 main 当作固定版本。
+临时 CLI 子进程仍显示 pnpm 12.3.4，项目门禁直接使用 12.15.0。
+
 ## 包体门禁
 
 当前 G1 基础入口基线由 `pnpm build` 输出测量；它只有身份/错误运行时，
@@ -77,5 +85,26 @@ README/manifest 核查测试用法；没有使用不相关文档，也没有修�
 consumer 检查包含 root gzip 预算与六个子入口无运行时导出的门禁；
 产物与 `.context` 不提交。未来实现各适配器时才替换相应零运行时门禁并制定真实预算。
 
-P2 内部源视图尚未接入公开入口。本轮重新 build/测量的七入口数值与上表一致，
-不是新坐标/位置实现或完整 P2 运行时的包体测量。
+P2 内部源视图及单文档事务内核尚未接入公开入口。本轮重新 build/测量的七入口
+数值与上表一致，不是新坐标/位置/事务实现或完整 P2 运行时的包体测量。
+
+P2 store/head 编排同样没有新增依赖、DOM 或 Node API；microtask 调度使用 ES Promise，
+不为调度器引入平台 ambient 类型。内部模块仍未导出，最新七入口测量数值不变，
+不能用它衡量新增 store/head 运行时。项目门禁继续由 pnpm 12.15.0 执行。
+
+Rope/SumTree 同样无新增依赖。用户指定的公开文章
+[Zed Decoded: Rope & SumTree](https://zed.dev/blog/zed-decoded-rope-sumtree)
+用作数据结构设计输入，未跟进其仓库/测试/视频或搬运文中 Rust 实现。
+多路 B+ tree、chunked rope 与 Unicode helper 均为本库 TypeScript 代码；
+JS GC/WeakRef 不等同于 Rust Arc 或线程间零复制。内部模块未入公开入口，
+七入口测量仍不衡量这些新增内部实现，详见 [存储设计](./editor-storage-design.md)。
+
+CRDT chunk 索引/身份定位/delta 物化继续复用该 B+ SumTree，没有新增依赖或平台 API。
+持久 ordered map 同样由现有树实现；本地 WeakMap object locators 不是持久 CRDT IDs。
+公共 exports/manifest/lock 未改，本轮重测的七入口数值仍与上表相同；这不是完整 CRDT
+运行时体积或大历史时间/空间验收。
+
+多文档 group 复用现有同步 SHA-256/规范 JSON、持久 history roots 和 ES Map/WeakMap；
+无新增依赖、Node/DOM API 或网络实现。typed bundle 不是公开 wire codec，
+counter plan 不使用额外随机流。内部模块仍未入包，七入口体积不代表这些新增运行时；
+见 [group 设计](./editor-transaction-groups.md)。

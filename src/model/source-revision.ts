@@ -4,6 +4,7 @@ import type {
 import { EditorError } from "../errors.js";
 import { documentId, revisionId, type DocumentId, type RevisionId } from "../identity.js";
 import { scalarUtf8Length, TextIndex } from "../coordinates/text-index.js";
+import { TextRope } from "../text/rope.js";
 
 /** Internal materialization boundary; not a persistent or public wire layout. */
 export interface SourceElement {
@@ -12,14 +13,33 @@ export interface SourceElement {
   readonly visible: boolean;
 }
 
-export interface SourceRevisionInput {
+interface SourceIdentity {
   readonly document: DocumentId;
   /** Canonical root identity, supplied by the history layer. */
   readonly root: string;
   readonly revision: RevisionId;
-  /** Full CRDT order, including invisible elements, without START/END. */
-  readonly elements: readonly SourceElement[];
 }
+/** Internal immutable, already causally validated order index. No caller-owned mutable implementations. */
+export interface SourceOrder {
+  readonly summary: Readonly<{ visible: number; utf16: number; utf8: number }>;
+  visibleAt(scalar: number): string | undefined;
+  guard(id: string): Readonly<{ before: number; visible: boolean }> | undefined;
+}
+export type SourceRevisionInput = SourceIdentity & (
+  | {
+    /** Full CRDT order, including invisible elements, without START/END. */
+    readonly elements: readonly SourceElement[];
+    /** Checked against the element stream in this materialization path. */
+    readonly text?: TextRope;
+    readonly order?: never;
+  }
+  | {
+    /** History-owned validated order/text pair; this path never enumerates full order. */
+    readonly order: SourceOrder;
+    readonly text: TextRope;
+    readonly elements?: never;
+  }
+);
 
 type Guard = Readonly<{ kind: "start" | "end" }> | Readonly<{ kind: "element"; id: string }>;
 interface SourceCut {
@@ -47,17 +67,17 @@ function checkAffinity(affinity: Affinity): void {
  * interpret absent history as a deletion. The future history boundary must
  * reject unknown revisions before calling resolve.
  *
- * Full order is compiled once to private guard -> visible-prefix ranks. This
- * retains tombstones for O(1) resolution without recursive tree traversal or
- * scanning a long run of deleted elements. No mutable input aliases survive.
+ * Native history shares its persistent visibility/identity index directly.
+ * The explicit element-input seam still compiles and validates a private flat
+ * index for independent materializations. Both preserve tombstone guards; neither
+ * interprets missing history as deletion or scans deleted runs during resolution.
  */
 export class SourceRevision {
   readonly document: DocumentId;
   readonly revision: RevisionId;
   readonly #root: string;
   readonly #index: TextIndex;
-  readonly #visible: readonly string[];
-  readonly #guards: ReadonlyMap<string, Readonly<{ before: number; visible: boolean }>>;
+  readonly #order: Pick<SourceOrder, "visibleAt" | "guard">;
 
   constructor(input: SourceRevisionInput) {
     this.document = documentId(input.document);
@@ -66,8 +86,21 @@ export class SourceRevision {
       throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: missing source root identity");
     }
     this.#root = input.root;
+    if (input.order) {
+      const { order, text } = input;
+      if (order.summary.visible !== text.summary.scalars || order.summary.utf16 !== text.summary.utf16 ||
+        order.summary.utf8 !== text.summary.utf8) {
+        throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: validated order/text summaries disagree");
+      }
+      this.#order = order;
+      this.#index = new TextIndex(text);
+      Object.freeze(this);
+      return;
+    }
     const visible: string[] = [];
     const text: string[] = [];
+    const rope = input.text;
+    const scalars = rope?.scalars();
     const guards = new Map<string, Readonly<{ before: number; visible: boolean }>>();
     for (const element of input.elements) {
       if (typeof element.id !== "string" || !element.id.length || guards.has(element.id) ||
@@ -78,12 +111,19 @@ export class SourceRevision {
       guards.set(element.id, Object.freeze({ before: visible.length, visible: element.visible }));
       if (element.visible) {
         visible.push(element.id);
-        text.push(element.scalar);
+        if (scalars) {
+          if (scalars.next().value !== element.scalar) {
+            throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: rope disagrees with visible source elements");
+          }
+        } else text.push(element.scalar);
       }
     }
-    this.#visible = Object.freeze(visible);
-    this.#guards = guards; // Private, never mutated after construction or exposed.
-    this.#index = new TextIndex(text.join(""));
+    if (scalars && !scalars.next().done) {
+      throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: rope has extra source text");
+    }
+    Object.freeze(visible);
+    this.#order = Object.freeze({ visibleAt: (scalar: number) => visible[scalar], guard: (id: string) => guards.get(id) });
+    this.#index = new TextIndex(rope ?? TextRope.fromChunks(text));
     Object.freeze(this);
   }
 
@@ -100,7 +140,7 @@ export class SourceRevision {
 
   #capture(scalar: number, affinity: Affinity): StablePosition {
     checkAffinity(affinity);
-    const id = affinity === "before" ? this.#visible[scalar - 1] : this.#visible[scalar];
+    const id = this.#order.visibleAt(affinity === "before" ? scalar - 1 : scalar);
     const guard: Guard = id === undefined
       ? Object.freeze({ kind: affinity === "before" ? "start" : "end" })
       : Object.freeze({ kind: "element", id });
@@ -171,7 +211,7 @@ export class SourceRevision {
       const offset = cut.guard.kind === "start" ? 0 : this.#index.length("utf16");
       return Object.freeze({ status: "present", point: this.#point(offset, "utf16") });
     }
-    const guard = this.#guards.get(cut.guard.id);
+    const guard = this.#order.guard(cut.guard.id);
     if (!guard) return Object.freeze({ status: "not-yet-created" });
     if (!guard.visible) {
       return Object.freeze({

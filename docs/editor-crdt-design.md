@@ -202,7 +202,9 @@ generation 是已观察该 group 最大值 + 1，ID 是固定排序，绝不是�
 
 一个本地跨源提交包含不可变 manifest：group ID、全部 document/base、
 每成员事务 ID、每成员的精确 before/after frontier。为避免自引用 hash，
-先分配 group/transaction IDs，再编码 manifest；revision digest 在内容确定后计算。
+先确定成员 transaction IDs/frontiers，再用规范 membership body 派生 group ID，
+编码 manifest 及事务的 group 引用；不对包含自身引用的 payload 求 hash。
+revision digest 在内容确定后计算。当前内部格式和验证见第 13 节。
 依赖 group manifest 中其他文档不自动使其出现在 head 中。
 
 revision set 为 group-closed：包含一个 group 成员时必须包含全部成员及其因果祖先。
@@ -254,3 +256,155 @@ P2 要用独立 oracle 和小模型对照真实生产实现；P3/P4 再验收会
 特别需要生产验证的成本：深链避免递归栈溢出、恶意图/metadata/待决内存限额、
 大闭包物化、规范 hash 跨环境一致性、事件不可重入、跨文档发布与回滚安全。
 首版无历史压缩；保留所有已接受历史，pin/导出位置不因静默 GC 失效。
+
+## 9. P2 单文档内核的内部约定
+
+以下记录已实现的接缝，方便复核；不把它发布为公共 wire format。
+`src/history` 不导入测试模型，公共入口尚未导出这些内部类。
+
+- root 编码依次为 domain `editor/root/v1`、document ID、external base ID、
+  exact initial text；revision 编码依次为 domain `editor/revision/v1`、
+  完整 root 身份字符串、规范 frontier 的事务身份字符串。
+  **每个字段（包括 domain）**前置 uint64 big-endian UTF-8 字节长度，再对连接字节
+  做 SHA-256。显示身份为 `root:<lowercase hex digest>`、`rev:<lowercase hex digest>`。
+  不使用平台字符串编码、路径、locale 或文本归一化。
+- 同步注册 API 不能等待 WebCrypto promise；使用依据 FIPS 180-4 编写的同步
+  SHA-256，不引入 Node/DOM 依赖。测试包含标准空串/短串/多块/百万字节向量，
+  Unicode root/revision golden 由独立 Node `crypto` 命令计算；未宣称真实浏览器验收。
+- writer 使用安全随机源或受信宿主注入的 `RandomSource`，不降级到 `Math.random`。
+  事务身份是 `t:<32 hex stream>:<16 hex counter>`，counter 从 1 开始，uint64 耗尽拒绝。
+  不恢复 stream，不把 counter 前缀变成依赖；完整 writer/store 租用生命周期仍由后续层实现。
+- 同 base 的 ranges 先转换为 scalar 边界，规范排序、去重并拒绝冲突，然后按范围
+  起点降序生成 effects。每个 delete effect 持有 base 中已观察的 ID 集合；每个 insert
+  effect 持有 scalar、parent/side、left/right origin。effect ordinal 按此规范执行顺序分配，
+  插入元素身份是 `<transaction ID>/<8 hex effect ordinal>`；根元素是
+  `<root identity>/<8 hex scalar index>`。ordinal 包含 delete effect 的位置。
+  只在内部暂存中使用不同命名空间的 draft 身份，验证全部效果与预算后才消耗 writer ID。
+- 内部规范 JSON 按 UTF-16 code-unit 顺序排序 object keys，有限 number 用 JSON
+  编码（`-0` 变成 `0`），字符串保持原始 Unicode/EOL；拒绝非 JSON、cycle、accessor、
+  sparse array 和超过 64 层的嵌套。这不是 RFC 8785 或已交付的公共 codec。
+  metadata 合计 16 KiB，typed 批次表示 8 MiB/100,000 scalar insert/delete effects；
+  最终 codec 加入 envelope/group 后必须重测本地可导出预算。
+- `accept` 在独立暂存图中拒绝环、缺依赖、非规范 frontier、同 ID 异 payload、
+  base 外引用与非法生成 gap；全部通过后才发布。重复同规范 payload 幂等。
+  单文档 kernel 不持有跨源 registry；payload 已含 group 引用，但须由第 13 节的
+  store 边界验证 group 闭包。不带 defer queue、bytes 或安全 decoder。
+  `revision`/`join` 是显式的闭包查询，不存在隐式 latest head；未知 revision 先报错，
+  再建立源视图，不能混成 `not-yet-created`。
+- 首版使用包含墓碑的双向 threaded order，现已由第 12 节的持久 chunk 索引替代；
+  不再每次查询重放身份图或重建整篇 origin 秩表。因果 ready 队列和完整闭包保留
+  仍是简单实现，大历史时间/空间仍可能为二次量级，不宣称完整性能验收。
+
+生产差分现在覆盖：三副本随机离线编辑与显式闭包重连、旧源视图/provenance、
+每个小图因果 cut 的 factorial oracle、固定 right-origin/连续输入 goldens，
+以及错误排序负对照和因果缩减。typed 重连不是历史 codec round trip；
+生产 undo、位置导出/retention 仍待后续实现；heads/CAS 见第 10 节，内部 group 见第 13 节。
+
+## 10. P2 内部 store/head 编排
+
+`NativeStore` 已接通单文档内核和锁定的 `EditingHead`/`HistoryQueries` 形状，
+但不是已导出的完整 `HistoryStore`。head 的固定成员集可有多个文档，
+当前跨源 commit 已由第 13 节的 manifest/闭包和统一 staging 支持。
+最初的单源 `group:${txId}` 占位引用已替换为绑定完整成员的 digest。
+
+- 文档按原始 base/text 和摘要核对，重复登记幂等。writer 由 store 持有，
+  head 借用 writer；跨 store writer 拒绝，活跃借用阻止释放。随机 stream 在此
+  store 生命周期内不能复用，包括已释放 stream 和已接受历史出现的 stream。
+  typed 接受不能扩展本实例独占租用的 writer stream，只能重复已有事务；
+  这不是认证，跨进程租用恢复仍不提供。
+- 版本集复制、排序并验证已知 revision；读取调用方 iterable 时立即复制每个 entry，
+  不保留 live head 或可变 Map。显式 typed 历史接受在 clone 上验证后替换 owner，
+  不移动 head。已返回快照独立保留源视图，并借用 store；无静默 GC 或级联释放。
+- CAS 比较 head ID、单调 stamp 和完整版本集。revision 可以 checkout 回原值，
+  stamp 不能回退。merge 允许固定成员子集，求已捕获精确闭包的并集；checkout
+  必须包含恰好相同的成员，不生成补偿事务。
+- 空/文本相同的替换在别名/冲突校验之后移除，批次净文本不变也不分配空 CRDT op。no-change commit
+  和已包含历史的 merge 不推进 stamp、不发源事件；显式 checkout 即使同 revision
+  仍推进 stamp 并发 `reason: "checkout"` 生命周期事件。未来 session 可据此清栈，
+  不是已实现/验收了 session undo。
+- receipt 是私有 WeakSet 登记的冻结值，包含精确前后 checkpoint；spread/cast
+  不能取得有效 receipt 身份。本地 head/stamp/commit/cursor ID 使用进程内单调命名，
+  不混成分布式历史 ID，不用于重启恢复。
+- revision 的 `parents` 由因果集合唯一确定：按 canonical frontier 的 ID 顺序，
+  分别去掉一个 maximal transaction 得到其直接因果父版本。它不记录“第一次通过
+  哪次 merge 创建这个 revision”。分页 cursor 绑定 store/document/exact revision；
+  provenance 输出 UTF-16 源范围并保持原创建事务/actor/attribution。
+- 事件按提交序在 microtask 发布；先发布完整源/checkpoint，再通知监听器。
+  监听期间所有同步源写入报 `REENTRANT_WRITE`，取消订阅可阻止尚未投递的回调。
+  单个 listener 的异常不回滚、不阻断其他 listener；交给 `onError`，没有 sink
+  或 sink 自身抛错时异步暴露错误，不静默吞掉。
+
+heads 状态机测试每 seed 12 个 32 步场景，用独立规格模型逐步核对三个隔离 head 的
+精确因果集合、文本、provenance 和旧快照，混合编辑、捕获版本 merge 与 checkout。
+失败保存 seed/run、完整命令、事务和预期集合；没有将事务级 shrinker 冒充命令级
+缩减器，因为移除命令会改变后续 checkout 的保存点索引。仍无安全 codec round trip、
+生产 undo、Diff 或公开工厂验收；跨文档 group 的新增差分见第 13 节。
+已有的大历史成本限制不变。
+
+## 11. Rope/SumTree 存储基础
+
+用户要求先补正规文本存储，并指定公开文章说明多路 B+ SumTree，而非经典二叉 rope。
+现已实现并接入真实写入、不可变 revision 文本与快照坐标层；树的不变量、
+摘要/CRLF、dimension cursor、路径共享和外部设计输入边界见
+[存储设计](./editor-storage-design.md)。最初拟议的 AVL 方案未落地。
+
+这不改变 FugueMax 的因果图、parent/origin、删除、位置或公共协议规则。
+它的结构性界限不能当作整笔事务的复杂度；CRDT 接入进展见下一节。
+
+## 12. CRDT 持久 chunk 索引与 delta 物化
+
+全序、墓碑可见性及 source guard 查询现已共享 `SequenceIndex`：
+
+- B+ items 是最多 64 entries 的不可变 chunks；摘要同时累计 entry/full/visible
+  长度和可见 UTF-16/UTF-8 长度。两个零文本 enter/exit markers 为每个元素保存
+  子树边界；这是内部索引结构，不是新增 CRDT ops 或 wire 字段。
+- 持久 ordered maps 从身份找到 chunk，再找到 leaf 和版本级父定位，聚合前缀秩；
+  共享节点没有可变父指针。不使用会无限增长的 fractional labels 或全局重标号。
+  子节点列表同样持久化，单 child 特化；right-origin 仍比较当前 full-order rank。
+- 新连续 forward chain 一次写入 chunks；删除按受影响 chunks 和连续可见区间更新，
+  不每 scalar 重建持久树。旧版本/墓碑仍可定位；不是已完成 scalar ID/run 压缩。
+- 每个 validated transaction 缓存其闭包的不可变物化；多 frontier revision 从
+  最大的已缓存 frontier 成员闭包出发，只应用差集 effects。不是按文本相似或 writer
+  counter 猜祖先，也不是承诺在所有缓存中寻找全局最近的因果子集。
+- 本地 prepare 和 typed acceptance 仍分别验证；accept 的 index/text caches 一起
+  暂存，非法批次不会发布合法前缀。detached input 不携带可受信的索引缓存。
+- native `SourceRevision` 直接共享已验证的 index/rope pair；独立 elements-input
+  接缝仍逐 scalar 检查并复制，不将这个内部受信接缝冒充安全 decoder。
+
+新增差分把真实 native index 的稳定位置与独立规格模型在每个因果 cut 两两比较，
+覆盖三种状态和删除修复；丢弃 indexed tombstones 的负对照必须失败。
+另有 40 个并发兄弟/连续 runs、顺逆交付和 child-tree 重平衡用例。
+结构共享、禁 full-order 枚举的真实 head 路径、delta effect 计数及尚未解决的成本见
+[存储设计](./editor-storage-design.md)。仍不宣称整笔 commit O(log n)。
+
+## 13. 多文档原子 group
+
+内部 `NativeStore` 已支持多源 prepare/统一接受发布、immutable manifest、group-closed
+版本边界和 typed 完整/delta 传递。所有成员使用同一批明确的 writer IDs，先暂定、
+完整验证后才消耗 counters；失败不发布合法前缀，不以 rewind 修复已消耗的 stream。
+
+manifest 按 document 排序，绑定每成员 exact root/base、事务 ID 和 before/after frontier；
+`group:<SHA-256>` 的 `editor/group/v1` digest 由规范 members body 派生，事务 payload
+包含该 group 引用。这个关系不含自身 payload/revision hash，避免自引用。
+group IDs 不是 actor/发送者认证；public opaque ID 契约没有改变。
+
+同一闭包规则覆盖 revisions/fork/merge/checkout 和 typed target/可验证 known/接受边界，
+缺组成员报 frozen 的精确 `missing` 和 `missingManifests`；即使 payload 尚缺，已知 manifest
+的 before 链仍可给出传递要求。不追源 head latest、不自动扩大固定成员或文档域。
+本地版本/传递结果必须包含每个触及组的全部成员及因果祖先。
+
+逐源图各自无环还不足够；store 检查跨源 group dependency DAG，并拒绝同组成员的
+before 向量遗漏已观察祖先组在另一写入源的成员。不能靠最终 target 补一个 merge
+来掩盖原子提交创作时不一致的 before。
+
+typed export 只取捕获 target 的因果集合，与可验证 known 做精确差；
+未知 known 安全重发 target closure，不用 counter 知识前缀。
+typed acceptance 一起暂存所有源、group/transaction registry 和 caches，整组预算
+包含 manifests/targets；通过后不移动任何现存 head。显式 documents 域不足整组拒绝。
+
+多源小图枚举用独立扁平 all-or-none membership oracle，各源文本/provenance 对照独立
+规格模型；另有三源/三 head seeded 状态机、半组负对照、跨组环、不一致 before、
+整组超预算/后源损坏回滚及 counter 不消耗。详见
+[group 设计、typed 边界与证据](./editor-transaction-groups.md)。
+未实现 public wire codec/defer、生产活性寄存器/undo、pin/位置导出、Diff 或公开工厂；
+没有 durable ACK、真实多进程网络或整体大历史性能验收。

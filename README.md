@@ -4,9 +4,14 @@
 `HistoryStore → EditingHead → EditorSession` 分层。
 
 **当前不是可用的编辑器。** 已有 API 契约、CRDT 算法规格、独立规格检查器、
-核心/协作/集成类型契约，以及身份构造器和错误类型。P2 已开始，内部源快照、
-三种单位的坐标索引和稳定位置解算已实现；尚未接入生产 CRDT/历史 store。
-生产事务、隔离 heads、codec、会话、MultiBuffer、同步、Diff、语言服务、
+核心/协作/集成类型契约，以及身份构造器和错误类型。P2 已有内部源快照、
+三种单位的坐标索引、稳定位置，以及接通源视图的单文档 FugueMax 事务内核。
+文本已采用持久化 B+ SumTree + chunked rope，接入真实替换和快照坐标查询。
+CRDT 全序/可见性已接入持久 chunk 索引、身份定位与 revision delta 物化，
+连续插入/删除按批更新，源快照直接共享索引而不编译整篇 guard 表。
+内部 store/head 编排已支持登记/查询、writer 所有权、隔离 heads、CAS/ABA 和精确
+merge/checkout，以及多文档原子 group、manifest、闭包检查和 typed bundle 传递。
+公共历史 store、wire codec、会话、MultiBuffer、同步端口、Diff、语言服务、
 字体塑形、GPU 视图和 playground 尚未实现。
 不会用抛 `not implemented` 的假工厂冒充运行时。
 
@@ -53,13 +58,30 @@ Lightning 是测试框架；Nasti 不用于生产打包。tsdown 以
 
 CRDT 检查器在 `tests/crdt`，不在生产包中。包括三副本离线/重连、完整依赖、
 快照、Unicode、位置、undo effects、独立枚举 oracle 和负对照。
-这些通过不代表真实生产内核已经通过，也不代表形式证明。
+其中 `native-history.test.ts` 对照真实生产单文档事务，`native-heads.test.ts`
+逐步对照真实 head 的精确因果集合、文本与 provenance；`transaction-groups.test.ts`
+枚举多源 cuts 并对照独立 all-or-none oracle，另做三文档/三 head 状态机。
+undo 控制仍只覆盖规格模型。
+测试通过不代表完整 P2 已验收，也不代表形式证明。
 
-P2 的内部源视图在 `src/model`、坐标索引在 `src/coordinates`。它们消费已验证的
-全序/可见性，不建立因果历史、不校验 root/revision digest；未知历史必须由后续
-history 层拒绝。位置差分用独立 oracle 提供全序、规格模型提供可见性与期望解算，
-只验证生产位置/坐标层。内部模块尚未接入包入口，不能通过包名调用，
-也不能把公开产物体积未变当作完整 P2 的包体结果。
+P2 内部实现位于 `src/history`、`src/model`、`src/coordinates`、`src/text` 和 `src/collections`。
+单文档历史层建立规范 root/revision 身份、writer stream、因果闭包和包含墓碑的
+FugueMax 全序；同 base 批量替换与 typed 事务接受先验证后发布，未知 revision 拒绝。
+原有源视图仍只消费已验证的全序/可见性。该内部 typed 接缝不是安全 wire codec，
+没有 pending 或 undo 控制。多文档 commit 统一验证/预算后发布一个 manifest/checkpoint；
+fork/merge/checkout/typed 传递须 group-closed，缺成员报告精确补齐需求，不追 latest、
+不自动扩 head membership/文档域。[group 边界与验证](docs/editor-transaction-groups.md)。
+事件在 microtask 按提交序
+通知，禁止监听器同步重入写入；store/head/writer/snapshot 的借用与释放分别校验。
+内部模块尚未接入包入口，不能通过包名调用，也不能把公开产物体积未变当作完整 P2
+的包体结果。公共工厂仍须等 codec/retention 和 `diff` 等完整契约齐全后才导出。
+
+rope 的底层是等深、多路、带组合摘要和 dimension cursor 的 B+ SumTree；
+单点修改共享未变子树，不用整篇 string/prefix array 做文本写入和坐标查询。
+身份通过 chunk/leaf/版本级父定位查前缀秩，right-origin 比较不再重建整篇 rank map；
+物化复用已缓存因果子集，只应用缺少的 effects。因果闭包、历史 Map 浅复制、
+rope 等值核对及显式全文/provenance 输出仍可能有全量成本，
+不能把 rope 的树高界限当成整笔 commit 的复杂度。[实现和验证边界](docs/editor-storage-design.md)。
 
 ## 设计与进度
 
@@ -67,6 +89,8 @@ history 层拒绝。位置差分用独立 oracle 提供全序、规格模型提�
 - [行为合同](docs/editor-contract.md)
 - [API 备选和确认记录](docs/editor-api-options.md)
 - [CRDT 算法规格与验证边界](docs/editor-crdt-design.md)
+- [Rope/SumTree 存储与增量化边界](docs/editor-storage-design.md)
+- [多文档原子 group 与 typed 传递](docs/editor-transaction-groups.md)
 - [集成契约与入口边界](docs/editor-integration-contracts.md)
 - [分阶段计划](docs/editor-implementation-plan.md)
 - [当前进度与实际检查](docs/editor-progress.md)
