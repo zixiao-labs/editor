@@ -5,6 +5,7 @@ import type {
   TransactionGroupId, TransactionId, UndoGroupId,
 } from "../identity.js";
 import type { EditorError, JsonValue } from "../errors.js";
+import type { HistoryBackendDescriptor, HistoryUndoProvider } from "./history-backend.js";
 
 export interface Disposable { dispose(): void }
 export interface CancellationSignal {
@@ -162,6 +163,8 @@ export type HistoryImportReport =
   | Readonly<{ status: "accepted" | "duplicate"; availableRevisions: RevisionSet }>
   | Readonly<{ status: "pending"; missing: readonly TransactionId[] }>;
 export interface HistoryStore extends Disposable {
+  readonly backend: HistoryBackendDescriptor;
+  readonly undo?: HistoryUndoProvider;
   createDocument(input: { id: DocumentId; base: { id: ExternalBaseId; text: string } }): RevisionEntry;
   openWriter(input: { actor: ActorId; replica: ReplicaId }): Writer;
   revisions(entries: readonly RevisionEntry[]): RevisionSet;

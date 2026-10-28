@@ -13,7 +13,9 @@
 因果闭包/历史 Map 管理与 rope 等值扫描仍有全量成本，整笔 commit 不等于 O(log n)。
 **多文档原子 group、manifest、闭包/域校验与 typed 传递已接通**，失败不发布合法前缀，
 不消耗 writer counters，不扩大固定 head 成员或传输域。
-公共历史 store、wire codec 与生产 undo 控制仍待完成，P3–P8 未实现；
+**用户已确认开放 CRDT/历史后端替换，公开接入层已实现**：完整产品工厂、协议描述、
+身份/opaque 隔离、资源归属及可选 selective-undo/defer 能力，不再把 FugueMax 当作公共前提。
+默认历史 store、wire codec 与生产 undo 控制仍待完成，P3–P8 未实现；
 内部生产差分通过不能当成完整生产历史验收，或把类型当可调用工厂。
 
 上一轮基线：用户恢复四份原设计文档后的 `b688a6e84f3a98d4ea51aaaa57288aa9462436ba`。
@@ -24,6 +26,8 @@ heads 基线仍为 `73e3c38`，前轮事务实现和文档尚未提交，已完�
 本轮存储基线仍为 `73e3c38` 加前述未提交实现；不丢弃之前的源码/文档改动。
 CRDT 索引轮仍基于相同 HEAD 及未提交存储实现，全部保留；无新增外部参考输入。
 group 轮仍为 `73e3c38` 加前述未提交实现，未重置既有改动或引入外部参考资料。
+当前后端轮基线是用户提交上述工作后的 `2629761`；切换后工作区干净，已复跑 103 项
+及 typecheck。原拟默认活性寄存器工作尚未改 runtime，就按用户确认优先补后端替换边界。
 Workflow 仍为 `maintainer-original`，仅 editor；原设计线程是用户指定的继续工作来源。
 此前未读取参考实现/研究目录/其他 worktree；本轮用户另指定 Zed 公开 Rope/SumTree
 文章（含文内示意片段）作为设计输入，未跟进其仓库、测试或视频，未搬运其中实现。
@@ -32,9 +36,9 @@ Workflow 仍为 `maintainer-original`，仅 editor；原设计线程是用户指
 | 阶段 | 状态 | 证据/剩余 |
 | --- | --- | --- |
 | G0 | 完成规格与独立验证设计 | `editor-crdt-design.md`、规格模型、枚举 oracle、负对照；不是形式化证明 |
-| G1 核心/协作 | 骨架和工具门禁通过 | branded IDs、head/session checkpoints、receipt/Diff、selection/projection、协作端口类型；仅身份/错误有运行时 |
+| G1 核心/协作 | 契约与工具门禁通过 | branded IDs、head/session checkpoints、receipt/Diff、协作类型；root 另有公开后端接入运行时 |
 | G1 集成类型 | 本轮契约/入口门禁通过 | 语言/LSP/shaping/vgpu/browser、六个 type-only 子入口、无 DOM/DOM consumer、12 个规范代码块与负对照；运行时依赖审查仍留给安装阶段 |
-| P2 | 进行中，存储/索引及原子 group 已接入 | 已有内部 store/head、持久文本/全序/可见性索引、group 闭包/域与 typed 传递；公共 store、undo 控制、安全 codec 与 pin/位置导出待完成 |
+| P2 | 进行中，存储/group 与公开接入层已接入 | 产品后端可替换，默认内核仍内部；默认 undo 控制、安全 codec、pin/位置导出与完整工厂待完成 |
 | P3/P4 | 未开始 | session/undo/MultiBuffer、同步/presence、结构化与 unified Agent Diff |
 | P5–P8 | 未开始 | 增量语法/真实 LSP、字体与 vgpu、输入/读屏、Diff view/playground、完整交付 |
 
@@ -442,12 +446,63 @@ Node 24.15.0、pnpm 12.15.0、HEAD `73e3c38`。实施前复跑 89 项基线通�
 pin/位置导出、Diff 或公共工厂；没有真实 browser/LSP/IME、跨进程网络/transfer 或 durable ACK。
 实现与证据见 [group 设计](./editor-transaction-groups.md)。未 commit、push、发布、PR 或合入。
 
+## 本轮变更：公开可替换历史后端
+
+- 用户先补充两篇公开文章，随后明确确认“替换 CRDT/历史后端”，不是只配置产品模式。
+  已阅读全文、记录来源；未跟进文章中的代码仓库/测试/视频。默认 FugueMax 没有被改成
+  DeltaDB，也不强迫外部后端使用 generation/count；公共边界按用户决定扩展为 API D11。
+- 新增 `HistoryBackendDefinition/Descriptor/Context`、完整 `HistoryStoreImplementation`、
+  `HistoryBackendProtocol` 及 `HistoryUndoProvider`。`HistoryStore.backend` 声明 family/
+  contract/algorithm/格式/能力，`undo` 是可选后端端口；同步 offer 复用同一 protocol 类型。
+- 公开 `defineHistoryBackend` 路由产品工厂并包装完整 store；拒绝缺方法、能力/端口不符、
+  重复使用已打开 implementation/facade。没有公开假的无参 `createHistoryStore` 或 native
+  provider。上层通过 `historyStoreFor(head)` 找到 store，不做 native `instanceof`。
+- SDK 发行带 family/algorithm/kind namespace 的 ID，以及 store/issuer-local positions、
+  receipts/undo tokens 和 format-bound 的 portable position tokens/bundles。
+  入口先校验归属再调用 provider；同协议仍由 provider 校验 root、闭包、codec/预算。
+  这不是安全 sandbox、认证或跨进程 decoder。
+- facade 统一 handle 所有权、head/writer/undo 借用、pin/snapshot/exported position 与
+  异步 Diff 的资源保留；成功 dispose 幂等，通知微任务排队/取消、同步重入拒绝，
+  caller revision sets/checkpoints/ranges/query 参数只捕获一次。
+- selective undo 是 opaque capture/apply 端口，方向明确、回真实 receipt，
+  不含默认引擎的寄存器/节点布局；session 栈、分组和 selection restoration 仍待实现。
+- 新增 11 项 runtime 接入测试与一个 ES-only type fixture。使用明确标注的 scripted
+  port doubles 验证路由/隔离/能力/生命周期，不冒充两个完整 CRDT 或算法 conformance。
+  既有默认内核的独立模型、factorial oracle 和 group state machine 保持不变。
+- 新测试先因缺模块失败；构建 consumer 检出旧 API 文档缺 backend 字段，已同步契约。
+  另检出旧依赖 regex 把错误字符串 `import"` 当作语法，改成带负对照的 VM 静态依赖
+  解析，保留 dynamic-loading/native-markers 禁入检查，未通过改错误文案绕过门禁。
+
+### 本轮实际验证
+
+Node 24.15.0、pnpm 12.15.0，HEAD `2629761`。没有新增依赖/升级工具；
+锁与七入口 export map 未改。`package.json` 只把新 type fixture 加入命令；
+root 的公开 runtime exports 与历史接口按用户授权扩展。
+
+| 命令 | 实际结果 |
+| --- | --- |
+| `pnpm install --frozen-lockfile` | 通过 |
+| `pnpm test` | 114 项通过，较基线新增 11 项 |
+| `pnpm test:types` | ES-only 三 fixture、DOM 一 fixture 通过 |
+| `pnpm typecheck` | ES-only/DOM/isolated declarations 三配置通过 |
+| `SEED=0/424242/4294967295 pnpm test:crdt`（分别执行） | 各 28 项通过 |
+| `pnpm build`、`pnpm test:consumer` | 七入口构建、两类 consumer 编译与 5 项门禁通过 |
+| `pnpm measure:package` | root JS 28,644 bytes / gzip 6,887；不含默认 CRDT，子入口 runtime 仍空 |
+| `git diff --check` | 通过 |
+
+当前只证明公开接入层行为，不证明第三方引擎算法、codec、安全或 durable 存储正确；
+尚无生产替代引擎或默认 native adapter，默认 undo、codec/defer、pin/位置导出、Diff、
+session/view 均未因此完成。没有大历史性能/内存、真实 browser/LSP/IME 或多进程验收。
+consumer 的 VM flag 只用于测试子进程解析，生产库不需要实验 flag 或 Node API。
+用法和具体边界见 [后端协议](./editor-history-backends.md)。未 commit、push、发布、PR 或合入。
+
 ## 下一项
 
-补生产 group 效果活性寄存器：revision-local 的 create/delete 活性、控制事务的
-generation/固定 ID 平局、跨源控制原子性和保留远端后代/其他 active delete tags；
-先做内核与独立规格模型差分，不冒充已实现 session undo 栈。
-之后继续安全 codec/defer、pin/position 保留，再补公共工厂所需的其余完整契约。
+回到默认后端的 group 效果活性寄存器：revision-local 的 create/delete 活性、控制事务
+的 generation/固定 ID 平局、跨源控制原子性和保留远端后代/其他 active delete tags。
+这是默认后端内部机制，不要求产品后端照搬；先做内核与独立模型差分，再接公开 undo port，
+不冒充已实现 session undo 栈。之后继续安全 codec/defer、pin/position 保留及完整 Diff，
+最后才发布满足全部契约的默认 backend/factory。
 核心与集成分别保持无 DOM/DOM 的声明边界；P2 的生产实现必须与规格模型和独立
 oracle 差分，不能把 `tests/crdt/support` 移到生产或以两份同算法输出相等结案。
 如果算法扩展或依赖能力发现与锁定 API 的真实冲突，再具体报告，不泛泛等待“继续”。

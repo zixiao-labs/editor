@@ -6,12 +6,11 @@ import type {
   DocumentId, ExternalBaseId, PresenceScopeId, SelectionId,
 } from "../identity.js";
 import type { EditorError, JsonValue } from "../errors.js";
+import type { HistoryBackendProtocol } from "./history-backend.js";
 
-export interface HistoryOfferDescriptor {
+export interface HistoryOfferDescriptor extends HistoryBackendProtocol {
   readonly target: RevisionSet;
   readonly documents: readonly Readonly<{ document: DocumentId; base: ExternalBaseId; digest: string }>[];
-  readonly format: string;
-  readonly algorithm: string;
 }
 export interface PeerKnowledge { readonly revisions: RevisionSet }
 export type HistoryReceiveEvent =

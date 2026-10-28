@@ -11,7 +11,8 @@ CRDT 全序/可见性已接入持久 chunk 索引、身份定位与 revision del
 连续插入/删除按批更新，源快照直接共享索引而不编译整篇 guard 表。
 内部 store/head 编排已支持登记/查询、writer 所有权、隔离 heads、CAS/ABA 和精确
 merge/checkout，以及多文档原子 group、manifest、闭包检查和 typed bundle 传递。
-公共历史 store、wire codec、会话、MultiBuffer、同步端口、Diff、语言服务、
+公开的后端接入层已支持产品提供完整历史实现；默认历史 store、wire codec、会话、
+MultiBuffer、同步端口、Diff、语言服务、
 字体塑形、GPU 视图和 playground 尚未实现。
 不会用抛 `not implemented` 的假工厂冒充运行时。
 
@@ -28,6 +29,13 @@ const actor = actorId("host-agent:1");
 不含控制字符、无孤立 surrogate，最多 1024 UTF-8 字节。
 `CoreFactories` / `CollaborationFactories` 等导出目前只是 TypeScript 契约，
 不是 `createHistoryStore` 等可调用的包导出。后续实现将按这些契约逐阶段加入。
+
+根入口另提供可调用的 `defineHistoryBackend`、`historyBackendId`、
+`assertHistoryBackendCompatibility` 和 `historyStoreFor`。
+产品可提供完整 `HistoryStoreImplementation`，通过 `backend.createStore()` 打开；
+上层不依赖 FugueMax，ID/opaque 值、格式、资源归属和可选 undo/defer 能力有明确边界。
+这不等于默认 native backend 已完成，也不认证产品后端的算法正确性。
+[接入方式与必需契约](docs/editor-history-backends.md)。
 
 六个子入口 `/collaboration`、`/languages`、`/lsp`、`/shaping`、`/vgpu`、`/browser`
 当前仅导出类型，ESM 为空模块；对应 `LanguageFactories`、`LspFactories`、
@@ -73,8 +81,9 @@ fork/merge/checkout/typed 传递须 group-closed，缺成员报告精确补齐�
 不自动扩 head membership/文档域。[group 边界与验证](docs/editor-transaction-groups.md)。
 事件在 microtask 按提交序
 通知，禁止监听器同步重入写入；store/head/writer/snapshot 的借用与释放分别校验。
-内部模块尚未接入包入口，不能通过包名调用，也不能把公开产物体积未变当作完整 P2
-的包体结果。公共工厂仍须等 codec/retention 和 `diff` 等完整契约齐全后才导出。
+默认内核模块尚未接入包入口，不能通过包名调用。root 现在包含的是通用后端接入层，
+不是完整 native CRDT 的包体结果。默认工厂仍须等 codec/retention 和 `diff` 等
+完整契约齐全后才导出；接入层拒绝把缺方法的内部 store 伪装成产品后端。
 
 rope 的底层是等深、多路、带组合摘要和 dimension cursor 的 B+ SumTree；
 单点修改共享未变子树，不用整篇 string/prefix array 做文本写入和坐标查询。
@@ -91,6 +100,7 @@ rope 等值核对及显式全文/provenance 输出仍可能有全量成本，
 - [CRDT 算法规格与验证边界](docs/editor-crdt-design.md)
 - [Rope/SumTree 存储与增量化边界](docs/editor-storage-design.md)
 - [多文档原子 group 与 typed 传递](docs/editor-transaction-groups.md)
+- [可替换历史后端与接入协议](docs/editor-history-backends.md)
 - [集成契约与入口边界](docs/editor-integration-contracts.md)
 - [分阶段计划](docs/editor-implementation-plan.md)
 - [当前进度与实际检查](docs/editor-progress.md)

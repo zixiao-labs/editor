@@ -60,8 +60,8 @@ Node `crypto` 只在独立测试数据生成命令中使用，不进入源码或
 
 ## 包体门禁
 
-当前 G1 基础入口基线由 `pnpm build` 输出测量；它只有身份/错误运行时，
-不能代表未来完整 CRDT/Diff 包体。root 不得静态引入 parser/font/WASM/GPU/playground。
+原 G1 基础入口只有身份/错误运行时；当前 root 增加通用后端接入层，
+仍不能代表完整默认 CRDT/Diff 包体。root 不得静态引入 parser/font/WASM/GPU/playground。
 为后续 P2–P4 设置 root ESM **128 KiB gzip 报警预算**，超出需说明实测原因及取舍，
 不得截断代码。可选入口与资产预算在选择各依赖时建立，不伪造尚无产物的数字。
 
@@ -71,22 +71,24 @@ Node `crypto` 只在独立测试数据生成命令中使用，不进入源码或
 
 | 入口 | JS bytes / gzip | 声明闭包 bytes / gzip |
 | --- | --- | --- |
-| root | 1,949 / 802 | 26,947 / 7,123 |
-| `/collaboration` | 0 / 20 | 23,051 / 6,000 |
-| `/languages` | 0 / 20 | 21,925 / 5,676 |
-| `/lsp` | 0 / 20 | 25,053 / 6,355 |
-| `/shaping` | 0 / 20 | 23,577 / 6,153 |
-| `/vgpu` | 0 / 20 | 27,014 / 7,308 |
-| `/browser` | 0 / 20 | 23,713 / 6,242 |
+| root | 28,644 / 6,887 | 32,445 / 8,629 |
+| `/collaboration` | 0 / 20 | 27,030 / 7,039 |
+| `/languages` | 0 / 20 | 25,900 / 6,712 |
+| `/lsp` | 0 / 20 | 29,028 / 7,390 |
+| `/shaping` | 0 / 20 | 27,552 / 7,188 |
+| `/vgpu` | 0 / 20 | 30,989 / 8,345 |
+| `/browser` | 0 / 20 | 27,688 / 7,277 |
 
-对比上一轮 root JS 仍是 1,949 / 802，未增加运行时；
-上一轮单入口声明 21,278 / 4,839 与现在拆分后的入口文件大小不可直接比较。
+对比原 root JS 1,949 / 802，本轮因公开接入层增加 runtime；仍低于 128 KiB gzip 预算。
+旧单入口声明与现在共享 chunk 的闭包大小不可直接比较。
 空文件 gzip 20 bytes 是压缩格式开销，不是实际适配器。
 consumer 检查包含 root gzip 预算与六个子入口无运行时导出的门禁；
 产物与 `.context` 不提交。未来实现各适配器时才替换相应零运行时门禁并制定真实预算。
 
-P2 内部源视图及单文档事务内核尚未接入公开入口。本轮重新 build/测量的七入口
-数值与上表一致，不是新坐标/位置/事务实现或完整 P2 运行时的包体测量。
+### 此前 P2 阶段记录（非本轮包体结果）
+
+P2 内部源视图及单文档事务内核尚未接入公开入口。此前各轮七入口数值保持
+原身份/错误基线，不是坐标/位置/事务实现或完整 P2 运行时的包体测量。
 
 P2 store/head 编排同样没有新增依赖、DOM 或 Node API；microtask 调度使用 ES Promise，
 不为调度器引入平台 ambient 类型。内部模块仍未导出，最新七入口测量数值不变，
@@ -108,3 +110,16 @@ CRDT chunk 索引/身份定位/delta 物化继续复用该 B+ SumTree，没有�
 无新增依赖、Node/DOM API 或网络实现。typed bundle 不是公开 wire codec，
 counter plan 不使用额外随机流。内部模块仍未入包，七入口体积不代表这些新增运行时；
 见 [group 设计](./editor-transaction-groups.md)。
+
+### 可替换后端接入
+
+公开 `defineHistoryBackend`/context SDK/facade 没有新增依赖或 Node/DOM API，
+不导入 native CRDT/rope/SumTree。`package.json` 只扩展 type fixture 命令，
+dependency、lock 与七入口 export map 未改；root 的 runtime 导出按用户确认扩展。
+上表是这轮重新 build/measure 的结果，不含完整默认内核。
+
+consumer 门禁发现旧 regex 将错误字符串末尾的 `import"` 当成 JS 依赖；
+现在用 Node VM module parser 检查静态 import/re-export 并带真实依赖负对照，
+继续禁止 dynamic loading，另检查无 native 内核 markers。
+`--experimental-vm-modules` 仅用于 consumer 测试子进程的语法解析，可能输出
+ExperimentalWarning；不是生产库或产品运行时要求，生产 Node ESM smoke 不带该 flag。

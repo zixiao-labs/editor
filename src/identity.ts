@@ -21,6 +21,7 @@ export type CommitId = Opaque<string, "CommitId">;
 export type UndoGroupId = Opaque<string, "UndoGroupId">;
 export type HistoryCursor = Opaque<string, "HistoryCursor">;
 export type PresenceScopeId = Opaque<string, "PresenceScopeId">;
+export type HistoryBackendId = Opaque<string, "HistoryBackendId">;
 
 function checked<Name extends string>(input: string): Opaque<string, Name> {
   if (typeof input !== "string" || !input.length || /[\u0000-\u001f\u007f-\u009f]/u.test(input)) {
@@ -50,3 +51,4 @@ export const transactionGroupId = (value: string): TransactionGroupId => checked
 export const selectionId = (value: string): SelectionId => checked(value);
 export const excerptId = (value: string): ExcerptId => checked(value);
 export const presenceScopeId = (value: string): PresenceScopeId => checked(value);
+export const historyBackendId = (value: string): HistoryBackendId => checked(value);

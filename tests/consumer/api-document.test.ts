@@ -17,6 +17,7 @@ const supplemental = {
     "SelectionId", "SelectionVersion", "SavedSelections", "SelectionRestoreResult",
     "SelectionChangeEvent", "EditorSession", "MultiBuffer", "CancellationSignal",
     "ExcerptSpec", "ProjectionDecoration",
+    "HistoryBackendDescriptor", "HistoryUndoProvider",
   ],
   Collaboration: [
     "HistorySyncPort", "HistorySyncOffer", "HistoryOfferDescriptor", "PeerKnowledge",

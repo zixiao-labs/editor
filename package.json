@@ -38,7 +38,7 @@
   "scripts": {
     "test": "lightning run tests/crdt tests/unit",
     "test:crdt": "lightning run tests/crdt",
-    "test:types": "lightning run --typecheck --tsconfig tsconfig.json tests/types/core.test-d.ts tests/types/integrations.test-d.ts && lightning run --typecheck --tsconfig tsconfig.browser.json tests/types/browser.test-d.ts",
+    "test:types": "lightning run --typecheck --tsconfig tsconfig.json tests/types/core.test-d.ts tests/types/integrations.test-d.ts tests/types/history-backend.test-d.ts && lightning run --typecheck --tsconfig tsconfig.browser.json tests/types/browser.test-d.ts",
     "test:consumer": "tsc --noEmit -p tests/consumer/tsconfig.json && tsc --noEmit -p tests/consumer/tsconfig.browser.json && lightning run tests/consumer",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.browser.json && tsc --noEmit -p tsconfig.build.json",
     "build": "tsdown src/index.ts src/collaboration.ts src/languages.ts src/lsp.ts src/shaping.ts src/vgpu.ts src/browser.ts --root src --format esm --platform neutral --target es2022 --dts --tsconfig tsconfig.build.json",

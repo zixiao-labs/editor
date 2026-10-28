@@ -2,6 +2,9 @@
 
 Status: locked (2026-10-27)
 
+后续明确变更：用户已确认开放 **CRDT/历史后端替换能力**，而不只是产品模式编排。
+D11 是本次授权的接口边界扩展；默认 FugueMax 的内部格式不再被解释成所有后端的约束。
+
 此状态锁定的是**待实现的公共契约**，不是“已有可用库”。用户已确认 B、编辑策略、可选连字资产、首版语言范围、单次提交 Diff，并要求继续；本文件据此收敛签名、默认值、失败语义与非目标。不声称用户逐字审阅过每个类型声明。后续不能因实现方便悄悄修改这些决定；发现算法或依赖无法支持时，先列出冲突，请用户重开对应决策。
 
 规范优先级：用户后续明确决定 → 本文件 → [行为合同](./editor-contract.md) → [备选方案与讨论记录](./editor-api-options.md)。本文补充而不削弱合同。代码块是声明/使用规范，不是已存在的导出；辅助类型的实现声明由类型契约测试验证。实施顺序见 [实施计划](./editor-implementation-plan.md)，集成辅助接口与入口/所有权边界见 [G1 集成契约](./editor-integration-contracts.md)。
@@ -95,6 +98,8 @@ CRLF 占两个 UTF-16 单元、一个逻辑换行；单独 CR/LF 也识别。CRL
 declare function createHistoryStore(options?: HistoryStoreOptions): HistoryStore;
 
 interface HistoryStore extends Disposable {
+  readonly backend: HistoryBackendDescriptor;
+  readonly undo?: HistoryUndoProvider;
   createDocument(input: {
     id: DocumentId;
     base: { id: ExternalBaseId; text: string };
@@ -132,7 +137,7 @@ interface EditingHead extends Disposable {
 
 `SourceEdit` 为 `{ document, range: TextRange, text }`；全部 ranges 必须属于 expect 内各文档的源 revision。commit 先完整验证，后一次发布；批次内坐标同时解释，不按数组顺序滚动解释。`origin` 为声明的来源，actor 由 writer 关联，metadata 不代表认证。
 
-`createDocument` 校验 document/base/content digest；相同登记幂等，不同内容/base 报错。不同 store 相同登记应互认根历史。writer 创建新写入流；actor/replica 可以相同，但不能复用活跃 stream/counter。无安全随机源时必须报错或要求注入，不能用弱随机冒充持久身份。
+`createDocument` 校验 document/base/content digest；相同登记幂等，不同内容/base 报错。同一兼容后端的不同 store 相同登记应互认根历史。默认实现的 writer 创建新写入流；actor/replica 可以相同，但不能复用活跃 stream/counter。若采用随机身份，无安全随机源时必须报错或要求注入，不能用弱随机冒充持久身份。其他后端可以采用不同身份方案，但必须满足并发唯一性、显式因果关系与隔离 head 的同等约束，不能把全局计数前缀当作未声明的祖先。
 
 head 成员在 fork 时固定，改变成员需显式派生另一个 head。merge 可选成员子集，不自动增加文档；它只整合传入的精确 source，不接受 live head。checkout 移动指针，不生成文本补偿；清空该 head 上 session 的 undo/redo，并明确通知。
 
@@ -437,3 +442,37 @@ glyph clusters 与源位置不等价；连字内部 caret 使用字体数据或�
 工具版本保持 Lightning 3.1.2、Nasti 2.7.0（仅 playground dev）、tsdown 0.23.2、TypeScript 7.0.2、pnpm 12.15.0。自有 CRDT，禁 Yjs/其包装及 Monaco/CodeMirror 替代实现。
 
 本次授权是继续设计/实施工作流，不是发布、push、PR 或合入共享分支。本会话只用 editor；不读取其他 worktree、参考源码/测试、研究目录或其他会话历史。若算法证明/依赖能力与本契约冲突，实施计划的 G0/G1 门禁要求停下报告，不静默降级。
+
+## D11. 可替换历史后端
+
+用户已明确要求替换 CRDT/历史后端，而非仅在固定算法之上配置产品模式。
+公开 `HistoryBackend` / `HistoryBackendDefinition` 与 `defineHistoryBackend` 接入完整产品
+`HistoryStoreImplementation`；工厂接收 `HistoryBackendContext` 和已有 options，
+返回的 store 带不可变 `backend` 描述。上层通过 `historyStoreFor(head)` 找到所属 store，
+不得依赖 `NativeStore`、FugueMax 节点布局或某个公共 ID 的内部计数格式。
+
+`HistoryBackendDescriptor` 明确 backend family ID、contractVersion、algorithm/身份语义版本、
+history/position 格式 ID 和 selectiveUndo/deferredImport 能力。跨后端不自动转换；
+同步 offer 的 `HistoryBackendProtocol` 头与 descriptor 使用同一命名，兼容性检查必须包含
+family、contract、algorithm 与所选 format，不能仅比较算法标签。
+
+默认 FugueMax 仍须完成全部必需契约后才能作为公开后端提供。产品接入入口不替代未实现的
+无参 `createHistoryStore`；不能把内部半成品通过 cast 或一组 not-implemented 方法充当后端。
+原子批次、精确因果版本、固定 head 成员、稳定位置/修复、历史查询、保留与完整 Diff 是
+基础要求；runtime shape 检查不是这些语义的正确性证明，产品后端须另做自己的 conformance 验证。
+
+后端通过 context 生成带 family/algorithm/kind 命名空间的 revision/transaction/group 等
+IDs，并发行本地 opaque positions/receipts/undo tokens；position tokens/history bundles
+额外带格式归属。跨后端在入口拒绝，同协议仍要由后端验证 root、闭包与 payload。
+格式标识不是安全认证，不声明不受信字节已解码或校验。
+
+可选 `HistoryUndoProvider` 提供 head-bound scope 的 capture/apply/dispose；
+apply 接受 opaque tokens 与 undo/redo 方向，返回 applied/partial/no-effect 和真实
+CommitReceipt。不公开 generation、奇偶计数、节点 ID 或删除标签布局。
+会话栈、命令分组、选区恢复仍在 D4；未来默认 session 在后端不支持 selective undo 时
+应在创建阶段报 `UNSUPPORTED_CAPABILITY`，不能等按撤销键时再暴露假实现。
+defer 不支持时，同样在调用后端前明确拒绝；未声明能力不得伪装成功。
+
+具体协议、后端作者用法、验证证据和保留的边界见
+[可替换历史后端](./editor-history-backends.md)。原有 D1–D10 的行为要求仍有效；
+本扩展不是算法迁移、Git 策略、UI/session 或网络实现已经完成的声明。

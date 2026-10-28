@@ -1,6 +1,7 @@
 import {
-  documentId, EditorError,
+  documentId, EditorError, defineHistoryBackend, historyBackendId, historyStoreFor,
   type CancellationSignal, type CoreFactories, type SessionCommitReceipt, type DiffInput,
+  type HistoryStoreImplementation,
 } from "@zixiao-labs/editor";
 import type { CollaborationFactories } from "@zixiao-labs/editor/collaboration";
 import type { LanguageFactories, SyntaxService } from "@zixiao-labs/editor/languages";
@@ -25,6 +26,15 @@ declare const shaping: ShapingFactories;
 declare const syntax: SyntaxService;
 declare const binding: LanguageBinding;
 declare const layout: LayoutEngine;
+declare const productBackend: HistoryStoreImplementation;
+const backend = defineHistoryBackend({
+  descriptor: {
+    id: historyBackendId("consumer:backend"), contractVersion: 1, algorithm: "product-order/v1",
+    formats: { history: "product-history/v1", position: "product-position/v1" },
+    capabilities: { selectiveUndo: false, deferredImport: false },
+  },
+  createStore() { return productBackend; },
+});
 // @ts-expect-error The headless fixture must never accidentally acquire a DOM library.
 type NoDom = HTMLCanvasElement;
 // @ts-expect-error Type-only contracts must not advertise callable runtime exports.
@@ -34,4 +44,5 @@ import { connectLanguageServer } from "@zixiao-labs/editor/lsp";
 void [
   error, signal, api, diff, collaboration, languages, lsp, shaping, syntax, binding, layout,
   createHistoryStore, connectLanguageServer,
+  backend, historyStoreFor,
 ];

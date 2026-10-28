@@ -1,13 +1,18 @@
 # 原生历史与序列 CRDT 规格
 
-状态：G0 的独立算法设计。不是已有生产 CRDT，不是公共 wire format。
+状态：默认 FugueMax 内核的独立规格；第 9–13 节记录内部生产实现，不是公共 wire format。
 公共行为仍以 [锁定 API](./editor-api.md) 为准；执行进度与实测证据另见
 [实施记录](./editor-progress.md)。本文件不修改已经确认的产品决定。
+用户后续明确确认开放历史后端替换；本文件的节点、身份、寄存器和内部编码约定
+只约束默认实现，不强迫产品后端采用 FugueMax。公共接入边界见 API D11 和
+[后端协议](./editor-history-backends.md)。
 
 ## 1. 来源、比较与选择
 
 只使用公开论文与本项目行为合同独立设计；未读取参考编辑器源码、测试或研究目录。
 没有使用论文链接的实现仓库，也不把上下文隔离声称为法律认证。
+以上是 G0 阶段的输入边界；后续用户还明确提供 Rope/SumTree、DeltaDB 版本控制及
+Zed CRDT 公开文章，新增来源记录见存储设计和后端协议。未跟进实现仓库/测试/视频。
 
 主要来源：Matthew Weidner、Martin Kleppmann，
 *The Art of the Fugue: Minimizing Interleaving in Collaborative Text Editing*，
