@@ -174,6 +174,7 @@ export class SourceRevision {
       revision: this.revision,
       lengthUtf16: this.#index.length("utf16"),
       text: () => active().#index.text,
+      readUtf16: (start, end) => active().#index.readUtf16(start, end),
       pointUtf16: (offset) => point(offset, "utf16"),
       pointUtf8: (offset) => point(offset, "utf8"),
       pointScalar: (offset) => point(offset, "scalar"),

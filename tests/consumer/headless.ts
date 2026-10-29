@@ -1,5 +1,6 @@
 import {
   documentId, EditorError, defineHistoryBackend, historyBackendId, historyStoreFor,
+  createTextSource,
   type CancellationSignal, type CoreFactories, type SessionCommitReceipt, type DiffInput,
   type HistoryStoreImplementation,
 } from "@zixiao-labs/editor";
@@ -35,6 +36,14 @@ const backend = defineHistoryBackend({
   },
   createStore() { return productBackend; },
 });
+// A product-owned read buffer needs neither a HistoryStore nor history identities.
+const text = createTextSource({
+  snapshot: () => ({ kind: "snapshot", lengthUtf16: 2, readUtf16: (a, b) => "AB".slice(a, b), dispose() {} }),
+  onChange: () => ({ dispose() {} }),
+});
+const read = text.snapshot();
+read.read(read.rangeUtf16(0, 1));
+read.dispose(); text.dispose();
 // @ts-expect-error The headless fixture must never accidentally acquire a DOM library.
 type NoDom = HTMLCanvasElement;
 // @ts-expect-error Type-only contracts must not advertise callable runtime exports.

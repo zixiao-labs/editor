@@ -81,6 +81,10 @@ export function historyBudget(envelope: unknown, transactions: readonly NativeTr
         throw new EditorError("LIMIT_EXCEEDED", "LIMIT_EXCEEDED: transaction group operations");
       }
     }
+    if (tx.control) operations++;
+    if (operations > MAX_HISTORY_OPERATIONS) {
+      throw new EditorError("LIMIT_EXCEEDED", "LIMIT_EXCEEDED: transaction group operations");
+    }
   }
   canonicalJson(envelope, MAX_HISTORY_BYTES);
 }

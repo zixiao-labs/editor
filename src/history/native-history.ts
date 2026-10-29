@@ -13,6 +13,18 @@ import {
   compareIds, FugueSequence, ordinalId, START, type NativeEffect, type NativeElement, type NativeInsert,
 } from "./sequence.js";
 import { checkGroupId, createManifest, MAX_HISTORY_BYTES, MAX_HISTORY_OPERATIONS } from "./transaction-group.js";
+import { OrderedMap } from "../collections/ordered-map.js";
+
+export interface NativeGroupControl {
+  readonly target: TransactionGroupId;
+  readonly member: TransactionId;
+  readonly generation: number;
+  readonly active: boolean;
+  /** First member transaction of the control group: shared by every document. */
+  readonly order: TransactionId;
+}
+export interface NativeActivity { readonly generation: number; readonly order: TransactionId | null; readonly active: boolean }
+const INITIAL_ACTIVITY: NativeActivity = Object.freeze({ generation: 0, order: null, active: true });
 
 /** Internal typed single-document effects, NOT a versioned/untrusted wire codec. */
 export interface NativeTransaction {
@@ -25,6 +37,7 @@ export interface NativeTransaction {
   readonly origin: EditOrigin;
   readonly attribution?: JsonValue;
   readonly effects: readonly NativeEffect[];
+  readonly control?: NativeGroupControl;
 }
 interface NativeRevision {
   readonly frontier: readonly TransactionId[];
@@ -34,6 +47,8 @@ interface Materialization {
   readonly ordered: readonly NativeTransaction[];
   /** Never mutated after storage; every staged writer first clones its roots. */
   readonly sequence: FugueSequence;
+  readonly originals: OrderedMap<TransactionGroupId, TransactionId>;
+  readonly activity: OrderedMap<TransactionGroupId, NativeActivity>;
 }
 export interface NativeEdit { readonly range: TextRange; readonly text: string }
 export interface NativeDraft { readonly transaction: NativeTransaction }
@@ -137,7 +152,10 @@ export class NativeHistory {
     } else {
       this.root = createRoot(input);
       this.initial = this.#record([]);
-      this.#states.set(this.initial, Object.freeze({ ordered: Object.freeze([]), sequence: new FugueSequence(this.root) }));
+      this.#states.set(this.initial, Object.freeze({
+        ordered: Object.freeze([]), sequence: new FugueSequence(this.root),
+        originals: OrderedMap.from<TransactionGroupId, TransactionId>(), activity: OrderedMap.from<TransactionGroupId, NativeActivity>(),
+      }));
     }
     Object.freeze(this);
   }
@@ -199,16 +217,31 @@ export class NativeHistory {
   /** Private staging owner: immutable transactions/revisions may be shared. */
   clone(): NativeHistory { return new NativeHistory(this); }
 
-  #apply(sequence: FugueSequence, tx: NativeTransaction): void {
+  #apply(base: Materialization, tx: NativeTransaction): Materialization {
+    const sequence = base.sequence.clone();
+    let originals = base.originals, activity = base.activity;
+    if (tx.control) {
+      const control = tx.control, old = activity.get(control.target) ?? INITIAL_ACTIVITY;
+      if (control.generation > old.generation ||
+        (control.generation === old.generation && (old.order === null || compareIds(control.order, old.order) > 0))) {
+        activity = activity.set(control.target, Object.freeze({
+          generation: control.generation, order: control.order, active: control.active,
+        }));
+        sequence.setGroupActive(control.target, control.active);
+      }
+      return Object.freeze({ ...base, sequence, originals, activity });
+    }
+    originals = originals.set(tx.group, tx.id);
     for (let i = 0; i < tx.effects.length; i++) {
       const effect = tx.effects[i]!;
-      if (effect.kind === "delete") sequence.delete(effect.targets);
+      if (effect.kind === "delete") sequence.delete(effect.targets, tx.group);
       else {
         const run = forwardRun(tx.effects, i);
-        sequence.addRun(run, tx.id, tx.actor);
+        sequence.addRun(run, tx.id, tx.actor, tx.group);
         i += run.length - 1;
       }
     }
+    return Object.freeze({ ...base, sequence, originals, activity });
   }
 
   #materialize(ordered: readonly NativeTransaction[], states = this.#states): Materialization {
@@ -225,9 +258,9 @@ export class NativeHistory {
       if (candidate && candidate.ordered.length > base.ordered.length) base = candidate;
     }
     const included = new Set(base.ordered.map((tx) => tx.id));
-    const sequence = base.sequence.clone();
-    for (const tx of ordered) if (!included.has(tx.id)) this.#apply(sequence, tx);
-    const state = Object.freeze({ ordered, sequence });
+    let next = base;
+    for (const tx of ordered) if (!included.has(tx.id)) next = this.#apply(next, tx);
+    const state = Object.freeze({ ...next, ordered });
     states.set(key, state);
     return state;
   }
@@ -237,6 +270,42 @@ export class NativeHistory {
   order(at: RevisionId): SequenceIndex { return this.#materialize(this.#known(at).ordered).sequence.order; }
 
   text(at: RevisionId): TextRope { return this.#materialize(this.#known(at).ordered).sequence.text; }
+
+  activity(at: RevisionId, group: TransactionGroupId): NativeActivity {
+    const state = this.#materialize(this.#known(at).ordered);
+    if (!state.originals.has(group)) invalid("group is not an original effect group in this revision");
+    return state.activity.get(group) ?? INITIAL_ACTIVITY;
+  }
+
+  controlDraft(input: { at: RevisionId; writer: NativeWriter; member: TransactionId; active: boolean }): NativeDraft {
+    input.writer.assertActive();
+    const revision = this.#known(input.at), state = this.#materialize(revision.ordered);
+    const target = this.transaction(input.member);
+    if (target.control || state.originals.get(target.group) !== target.id || input.writer.stream !== target.id.slice(2, 34) ||
+      target.actor !== input.writer.actor || target.replica !== input.writer.replica || typeof input.active !== "boolean") {
+      invalid("control must target an observed original group in the writer's undo domain");
+    }
+    const previous = state.activity.get(target.group) ?? INITIAL_ACTIVITY;
+    if (previous.generation === Number.MAX_SAFE_INTEGER) throw new EditorError("LIMIT_EXCEEDED", "LIMIT_EXCEEDED: control generation exhausted");
+    const placeholder = "d:00000000000000000000000000000000:0000000000000001" as TransactionId;
+    const sequence = state.sequence.clone();
+    sequence.setGroupActive(target.group, input.active);
+    const draft = Object.freeze({ transaction: canonicalCopy({
+      id: placeholder, group: `group:${"0".repeat(64)}` as TransactionGroupId, root: this.root.id,
+      depends: revision.frontier, actor: input.writer.actor, replica: input.writer.replica,
+      origin: { kind: input.active ? "redo" : "undo" }, effects: [],
+      control: { target: target.group, member: target.id, generation: previous.generation + 1, active: input.active, order: placeholder },
+    } satisfies NativeTransaction) });
+    this.#drafts.set(draft, sequence.text);
+    return draft;
+  }
+
+  prepareControl(input: { at: RevisionId; writer: NativeWriter; member: TransactionId; active: boolean }): NativeTransaction {
+    const draft = this.controlDraft(input), allocation = input.writer.plan(1);
+    const transaction = this.finalize(draft, allocation.ids[0]!);
+    input.writer.commit(allocation);
+    return transaction;
+  }
 
   source(at: RevisionId): SourceRevision {
     const cached = this.#sources.get(at)?.deref();
@@ -352,7 +421,7 @@ export class NativeHistory {
     return result;
   }
 
-  finalize(input: NativeDraft, id: TransactionId, group?: TransactionGroupId): NativeTransaction {
+  finalize(input: NativeDraft, id: TransactionId, group?: TransactionGroupId, controlOrder: TransactionId = id): NativeTransaction {
     const expected = this.#drafts.get(input);
     if (!expected) invalid("draft belongs to another staging history");
     checkTransactionId(id);
@@ -364,6 +433,7 @@ export class NativeHistory {
       transaction: id, before: draft.depends, after: [id],
     }]).id;
     checkGroupId(membership);
+    if (draft.control) checkTransactionId(controlOrder);
     // Rewrite only identities generated by THIS draft, never origin strings,
     // metadata or an external node with a similar prefix.
     const generated = new Set(effects.filter((effect) => effect.kind === "insert").map((effect) => effect.id));
@@ -372,6 +442,7 @@ export class NativeHistory {
       ...draft, id, group: membership, effects: effects.map((effect) => effect.kind === "delete" ? effect : {
         ...effect, id: rekey(effect.id), parent: rekey(effect.parent), left: rekey(effect.left), right: rekey(effect.right),
       }),
+      ...(draft.control ? { control: { ...draft.control, order: controlOrder } } : {}),
     });
     this.#prepared.set(transaction, expected);
     return transaction;
@@ -382,7 +453,22 @@ export class NativeHistory {
     if (canonicalJson(tx.depends) !== canonicalJson(this.#frontier(dependencies))) {
       throw new EditorError("INVALID_CAUSAL_GRAPH", "INVALID_CAUSAL_GRAPH: dependencies must be a canonical frontier");
     }
-    const base = this.#materialize(dependencies, states).sequence;
+    const materialized = this.#materialize(dependencies, states), base = materialized.sequence;
+    if (tx.control) {
+      const control = tx.control;
+      checkGroupId(control.target); checkTransactionId(control.member); checkTransactionId(control.order);
+      const member = available.get(control.member);
+      const previous = materialized.activity.get(control.target) ?? INITIAL_ACTIVITY;
+      if (tx.effects.length || !member || member.control || member.group !== control.target ||
+        materialized.originals.get(control.target) !== member.id || typeof control.active !== "boolean" ||
+        !Number.isSafeInteger(control.generation) || control.generation !== previous.generation + 1 ||
+        tx.id.slice(2, 34) !== member.id.slice(2, 34) || control.order.slice(2, 34) !== member.id.slice(2, 34) ||
+        tx.actor !== member.actor || tx.replica !== member.replica) invalid("invalid group control/domain/generation");
+      states.set(this.#key([tx.id]), Object.freeze({
+        ...this.#apply(materialized, tx), ordered: Object.freeze([...dependencies, tx]),
+      }));
+      return;
+    }
     const sequence = base.clone();
     const deleted = new Set<string>();
     for (let ordinal = 0; ordinal < tx.effects.length; ordinal++) {
@@ -393,7 +479,7 @@ export class NativeHistory {
           if (id === START || !base.visible(id) || deleted.has(id)) invalid("delete must name distinct base-visible elements");
           deleted.add(id);
         }
-        sequence.delete(effect.targets);
+        sequence.delete(effect.targets, tx.group);
       } else if (effect.kind === "insert") {
         const gap = sequence.gap(effect.left);
         if (effect.parent !== gap.parent || effect.side !== gap.side || effect.right !== gap.right) {
@@ -404,11 +490,14 @@ export class NativeHistory {
           scalarUtf8Length(run[i]!.scalar);
           if (run[i]!.id !== ordinalId(tx.id, ordinal + i)) invalid("insertion identity does not match effect ordinal");
         }
-        sequence.addRun(run, tx.id, tx.actor);
+        sequence.addRun(run, tx.id, tx.actor, tx.group);
         ordinal += run.length - 1;
       } else invalid("unknown effect kind");
     }
-    states.set(this.#key([tx.id]), Object.freeze({ ordered: Object.freeze([...dependencies, tx]), sequence }));
+    states.set(this.#key([tx.id]), Object.freeze({
+      ordered: Object.freeze([...dependencies, tx]), sequence,
+      originals: materialized.originals.set(tx.group, tx.id), activity: materialized.activity,
+    }));
   }
 
   /** Typed staging seam only: no defer queue, envelope decoder or group acceptance. */
@@ -419,17 +508,25 @@ export class NativeHistory {
     // Detach all caller aliases and validate identity/envelope budgets first.
     const copied = canonicalCopy(incoming, MAX_HISTORY_BYTES);
     let operations = 0;
+    const originals = new Map([...this.#accepted.values()].filter((tx) => !tx.control).map((tx) => [tx.group, tx.id]));
     for (const tx of copied) {
       checkTransactionId(tx.id);
       checkGroupId(tx.group);
       if (tx.root !== this.root.id) throw new EditorError("BASE_MISMATCH", "BASE_MISMATCH: transaction belongs to another root");
       transactionMetadata(tx);
+      if (tx.control !== undefined && (!tx.control || typeof tx.control !== "object")) invalid("malformed control");
       if (!Array.isArray(tx.depends) || !Array.isArray(tx.effects)) invalid("malformed transaction arrays");
       for (const dependency of tx.depends) checkTransactionId(dependency);
       if (new Set(tx.depends).size !== tx.depends.length) {
         throw new EditorError("INVALID_CAUSAL_GRAPH", "INVALID_CAUSAL_GRAPH: duplicate dependency");
       }
       for (const effect of tx.effects) operations += effect.kind === "delete" ? effect.targets.length : 1;
+      if (tx.control) operations++;
+      else {
+        const original = originals.get(tx.group);
+        if (original !== undefined && original !== tx.id) invalid("multiple original transactions for one group/document");
+        originals.set(tx.group, tx.id);
+      }
       if (operations > MAX_HISTORY_OPERATIONS) throw new EditorError("LIMIT_EXCEEDED", "LIMIT_EXCEEDED: transaction operations");
       const previous = staged.get(tx.id);
       if (previous && canonicalJson(previous) !== canonicalJson(tx)) {
@@ -452,7 +549,7 @@ export class NativeHistory {
         const state = this.#states.get(at)!;
         const sequence = state.sequence.clone();
         sequence.reusePreparedText(text);
-        this.#states.set(at, Object.freeze({ ordered: state.ordered, sequence }));
+        this.#states.set(at, Object.freeze({ ...state, sequence }));
       }
     }
     return added.size ? "accepted" : "duplicate";

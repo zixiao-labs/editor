@@ -62,9 +62,9 @@ test("cold merge applies only missing causal effects and memoized/old revisions 
   const imported = new NativeHistory({ document, base, text: "R" });
   const addRun = FugueSequence.prototype.addRun;
   const calls: string[] = [];
-  FugueSequence.prototype.addRun = function (inserts, transaction, actor) {
+  FugueSequence.prototype.addRun = function (inserts, transaction, actor, group) {
     calls.push(...inserts.map((insert) => insert.id));
-    return addRun.call(this, inserts, transaction, actor);
+    return addRun.call(this, inserts, transaction, actor, group);
   };
   try {
     imported.accept(JSON.parse(JSON.stringify([...all].reverse())) as NativeTransaction[]);
@@ -104,8 +104,8 @@ test("real head edits and position queries neither enumerate full order nor repl
   const splice = SequenceIndex.prototype.splice;
   let inserted = 0;
   let splices = 0;
-  FugueSequence.prototype.addRun = function (run: readonly NativeInsert[], transaction, actor) {
-    inserted += run.length; return addRun.call(this, run, transaction, actor);
+  FugueSequence.prototype.addRun = function (run: readonly NativeInsert[], transaction, actor, group) {
+    inserted += run.length; return addRun.call(this, run, transaction, actor, group);
   };
   SequenceIndex.prototype.entries = () => { throw new Error("full order enumeration"); };
   FugueSequence.prototype.elementsIterator = () => { throw new Error("full graph projection"); };

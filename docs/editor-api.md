@@ -2,8 +2,9 @@
 
 Status: locked (2026-10-27)
 
-后续明确变更：用户已确认开放 **CRDT/历史后端替换能力**，而不只是产品模式编排。
-D11 是本次授权的接口边界扩展；默认 FugueMax 的内部格式不再被解释成所有后端的约束。
+后续明确变更：用户已确认开放 **CRDT/历史后端替换能力**，而不只是产品模式编排；
+又要求支持外部文本存储的仅渲染模式。D11/D12 记录这两项边界扩展；
+默认 FugueMax 的内部格式不再被解释成所有后端或只读文本源的约束。
 
 此状态锁定的是**待实现的公共契约**，不是“已有可用库”。用户已确认 B、编辑策略、可选连字资产、首版语言范围、单次提交 Diff，并要求继续；本文件据此收敛签名、默认值、失败语义与非目标。不声称用户逐字审阅过每个类型声明。后续不能因实现方便悄悄修改这些决定；发现算法或依赖无法支持时，先列出冲突，请用户重开对应决策。
 
@@ -71,6 +72,7 @@ interface TextSnapshot extends Disposable {
   readonly revision: RevisionId;
   readonly lengthUtf16: number;
   text(): string;
+  readUtf16(start: number, end: number): string;
   pointUtf16(offset: number): TextPoint;
   pointUtf8(offset: number): TextPoint;
   pointScalar(offset: number): TextPoint;
@@ -476,3 +478,34 @@ defer 不支持时，同样在调用后端前明确拒绝；未声明能力不�
 具体协议、后端作者用法、验证证据和保留的边界见
 [可替换历史后端](./editor-history-backends.md)。原有 D1–D10 的行为要求仍有效；
 本扩展不是算法迁移、Git 策略、UI/session 或网络实现已经完成的声明。
+
+## D12. 外部文本存储与仅渲染模式
+
+产品可以独立选择文本存储与历史后端。仅渲染不需要创建 `HistoryStore`、writer、稳定位置
+或 CRDT，也不要求使用内置 rope/SumTree。内置完整后端的目标是开箱即用，不是入口前提。
+完整外部历史按 D11 接入；仅渲染的 gap buffer/piece table/持久快照按本节接入。
+
+根入口公开 `createTextSource(provider, { onError? })` 与
+`textSourceFromHead(head, document)`。`TextSourceProvider` 只提供可释放 read lease 和
+变更订阅；返回 `TextSource` 只读、借用产品数据，不写入、不销毁产品 buffer/head/store。
+`TextSnapshot.readUtf16(start, end)` 增补有界读取，遵循 D2 的 scalar-safe 半开范围；
+不得为局部布局被迫调用 `text()` 展平整篇。
+
+lease 分两类：`snapshot` 的旧内容持久不变；`versioned` 借用可变存储，必须提供检测每次
+mutation（含 ABA）的 `isCurrent()`。后者在每次读取前后检查；失效报 `STALE_TEXT_VIEW`，
+不返回撕裂文本。产品保证并发读取安全；版本检查本身不是锁或跨线程内存屏障。
+内部 raw lease 必须支持边界探测，即允许单独 UTF-16 单元；公开 read snapshot 只返回
+完整 Unicode scalars，不归一化文本/EOL，验证仅限所请求的范围及边界，不全量扫描存储。
+
+每份 `TextReadSnapshot` 有独立 `TextReadVersion`；point/range 绑定这份 read，而非 revision。
+异 read 的 range 报 `WRONG_TEXT_VIEW`；这些值不能进入 edit/StablePosition/历史同步。
+`assertValid()` 检查能否继续读取；`source.isCurrent(read)` 另检查是否仍可作为最新布局发布。
+持久旧读可能仍有效但已非最新；异步布局必须同时检查 source/read/layout generation。
+活动 read 阻止 source dispose；通知是可合并的失效提示，不是逐事务事件或历史记录。
+
+`/shaping` 增加 `shapeText/layoutText` 和只读布局结果；`/vgpu` 增加
+`VgpuTextView`、`mountVgpuTextView` 与 `setSource` 契约，不要求 `EditorSession`。
+只读 view 不满足可编辑 `EditorGeometry`，不能接到编辑输入桥。
+快速/完整模式由产品显式替换 source、保留或迁移数据；不自动转换旧坐标或恢复 gap buffer
+没有记录的历史。具体用法见 [只读文本源](./editor-text-sources.md)。
+当前只读适配运行时已实现，shaping/GPU view 仍只有类型契约，不能据此声称已经绘制文字。

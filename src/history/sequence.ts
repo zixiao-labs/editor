@@ -33,11 +33,21 @@ interface Slot {
   readonly actor: ActorId | null;
   readonly L: Children;
   readonly R: Children;
+  readonly creator: string | null;
+  readonly deletes: string | OrderedMap<string, true> | null;
+  readonly activeDeletes: number;
 }
 type Children = string | SumTree<string, number> | null;
 const childOps: SummaryOps<string, number> = { empty: 0, measure: () => 1, add: (a, b) => a + b };
 const childCount = (children: Children): number => children === null ? 0 : typeof children === "string" ? 1 : children.length;
 const childAt = (children: Children, index: number): string => typeof children === "string" ? children : children!.at(index);
+const emptyIds = SumTree.from<string, number>([], childOps);
+const noEffects = Object.freeze({ created: emptyIds, deleted: emptyIds });
+const hasTag = (tags: Slot["deletes"], group: string): boolean => typeof tags === "string" ? tags === group : tags?.has(group) ?? false;
+function withTag(tags: Slot["deletes"], group: string): Slot["deletes"] {
+  if (!tags) return group;
+  return typeof tags === "string" ? OrderedMap.from([[tags, true as const], [group, true as const]]) : tags.set(group, true);
+}
 function insertChild(children: Children, at: number, child: string): Children {
   if (!children) return child;
   if (typeof children === "string") return SumTree.from(at ? [children, child] : [child, children], childOps);
@@ -61,16 +71,21 @@ export class FugueSequence {
   #slots: OrderedMap<string, Slot>;
   #order: SequenceIndex;
   #text: TextRope;
+  #active = OrderedMap.from<string, boolean>();
+  #effects = OrderedMap.from<string, Readonly<{ created: SumTree<string, number>; deleted: SumTree<string, number> }>>();
 
   constructor(root: RootRegistration | FugueSequence) {
     if (root instanceof FugueSequence) {
       this.#slots = root.#slots; this.#order = root.#order; this.#text = root.#text;
+      this.#active = root.#active; this.#effects = root.#effects;
     } else {
       const entries: OrderEntry[] = [];
       const slots: [string, Slot][] = [];
       const scalars = [...root.text];
       const first = scalars.length ? ordinalId(root.id, 0) : null;
-      slots.push([START, Object.freeze({ insert: null, transaction: null, actor: null, L: null, R: first })]);
+      slots.push([START, Object.freeze({
+        insert: null, transaction: null, actor: null, L: null, R: first, creator: null, deletes: null, activeDeletes: 0,
+      })]);
       entries.push(...markers(START, null).slice(0, 2));
       let previous = START;
       for (let ordinal = 0; ordinal < scalars.length; ordinal++) {
@@ -82,6 +97,7 @@ export class FugueSequence {
         slots.push([id, Object.freeze({
           insert, transaction: null, actor: null, L: null,
           R: ordinal + 1 < scalars.length ? ordinalId(root.id, ordinal + 1) : null,
+          creator: null, deletes: null, activeDeletes: 0,
         })]);
         entries.push(...markers(id, Object.freeze({ id, scalar, visible: true, transaction: null, actor: null })).slice(0, 2));
         previous = id;
@@ -112,25 +128,66 @@ export class FugueSequence {
     return childCount(slot.R) ? { right, parent: right, side: "L" } : { right, parent: left, side: "R" };
   }
 
-  delete(targets: readonly string[]): void {
-    const offsets: number[] = [];
+  delete(targets: readonly string[], group = "$draft"): void {
+    const added: string[] = [];
     const seen = new Set<string>();
+    const slots: [string, Slot][] = [];
     for (const id of targets) {
-      const found = this.#order.locate(`${id}=`);
-      const element = found?.entry.element;
-      if (!element) throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: unknown deletion target");
-      if (element.visible && !seen.has(id)) offsets.push(found.before.visible);
+      const slot = this.#slots.get(id);
+      if (!slot?.insert) throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: unknown deletion target");
+      if (hasTag(slot.deletes, group) || seen.has(id)) continue;
       seen.add(id);
+      added.push(id);
+      slots.push([id, Object.freeze({
+        ...slot, deletes: withTag(slot.deletes, group), activeDeletes: slot.activeDeletes + (this.#active.get(group) === false ? 0 : 1),
+      })]);
     }
-    offsets.sort((a, b) => b - a);
+    this.#slots = this.#slots.update(slots);
+    if (added.length) {
+      const effects = this.#effects.get(group) ?? noEffects;
+      this.#effects = this.#effects.set(group, Object.freeze({ ...effects, deleted: effects.deleted.concat(SumTree.from(added, childOps)) }));
+      this.#refresh(added);
+    }
+  }
+
+  /** Toggle only this group's creation/delete tags, never recurse into descendants. */
+  setGroupActive(group: string, active: boolean): void {
+    if ((this.#active.get(group) ?? true) === active) return;
+    const effects = this.#effects.get(group) ?? noEffects;
+    this.#active = this.#active.set(group, active);
+    const slots: [string, Slot][] = [];
+    for (const id of effects.deleted) {
+      const slot = this.#slots.get(id)!;
+      slots.push([id, Object.freeze({ ...slot, activeDeletes: slot.activeDeletes + (active ? 1 : -1) })]);
+    }
+    this.#slots = this.#slots.update(slots);
+    this.#refresh(new Set([...effects.created, ...effects.deleted]));
+  }
+
+  #refresh(affected: Iterable<string>): void {
+    const updates: { id: string; visible: boolean; full: number; start: number; end: number; scalar: string }[] = [];
+    for (const id of affected) {
+      const slot = this.#slots.get(id)!;
+      const visible = (slot.creator === null || this.#active.get(slot.creator) !== false) && slot.activeDeletes === 0;
+      const old = this.#order.locate(`${id}=`)!;
+      if (visible !== old.entry.element!.visible) updates.push({
+        id, visible, full: old.before.full, start: old.before.visible,
+        end: old.before.visible + (old.entry.element!.visible ? 1 : 0), scalar: visible ? old.entry.element!.scalar : "",
+      });
+    }
+    updates.sort((a, b) => a.full - b.full);
+    const ranges: { start: number; end: number; scalars: string[] }[] = [];
+    for (const update of updates) {
+      const last = ranges[ranges.length - 1];
+      if (last && last.end === update.start) { last.end = update.end; last.scalars.push(update.scalar); }
+      else ranges.push({ start: update.start, end: update.end, scalars: [update.scalar] });
+    }
     let text = this.#text;
-    for (let i = 0; i < offsets.length;) {
-      let end = i + 1;
-      while (end < offsets.length && offsets[end] === offsets[end - 1]! - 1) end++;
-      text = text.replace(offsets[end - 1]!, offsets[i]! + 1, TextRope.from(""), "scalar");
-      i = end;
+    for (let i = ranges.length - 1; i >= 0; i--) {
+      const range = ranges[i]!;
+      text = text.replace(range.start, range.end, TextRope.fromChunks(range.scalars), "scalar");
     }
-    this.#order = this.#order.hide(targets);
+    this.#order = this.#order.setVisibility(updates);
     this.#text = text;
   }
 
@@ -139,7 +196,7 @@ export class FugueSequence {
   }
 
   /** A new forward chain is one chunk splice, not one persistent edit per scalar. */
-  addRun(inserts: readonly NativeInsert[], transaction: TransactionId | null, actor: ActorId | null): void {
+  addRun(inserts: readonly NativeInsert[], transaction: TransactionId | null, actor: ActorId | null, group: string | null = null): void {
     if (!inserts.length) return;
     const insert = inserts[0]!;
     const parent = this.#slots.get(insert.parent);
@@ -179,17 +236,26 @@ export class FugueSequence {
     const entries: OrderEntry[] = [];
     const slots: [string, Slot][] = [];
     inserts.forEach((node, index) => {
-      const element = Object.freeze({ id: node.id, scalar: node.scalar, visible: true, transaction, actor });
+      const element = Object.freeze({ id: node.id, scalar: node.scalar, visible: group === null || this.#active.get(group) !== false, transaction, actor });
       entries.push(...markers(node.id, element).slice(0, 2));
       slots.push([node.id, Object.freeze({
         insert: Object.freeze({ ...node }), transaction, actor, L: null, R: inserts[index + 1]?.id ?? null,
+        creator: group, deletes: null, activeDeletes: 0,
       })]);
     });
     for (let i = inserts.length - 1; i >= 0; i--) entries.push(Object.freeze({ key: `${inserts[i]!.id}>`, element: null }));
     this.#order = this.#order.splice(before.entries + 1, 0, entries);
-    this.#text = this.#text.replace(position, position, TextRope.fromChunks(inserts.map((node) => node.scalar)), "scalar");
+    if (group === null || this.#active.get(group) !== false) {
+      this.#text = this.#text.replace(position, position, TextRope.fromChunks(inserts.map((node) => node.scalar)), "scalar");
+    }
     slots.push([insert.parent, Object.freeze({ ...parent, [insert.side]: insertChild(siblings, low, insert.id) })]);
     this.#slots = this.#slots.update(slots);
+    if (group !== null) {
+      const effects = this.#effects.get(group) ?? noEffects;
+      this.#effects = this.#effects.set(group, Object.freeze({
+        ...effects, created: effects.created.concat(SumTree.from(inserts.map((node) => node.id), childOps)),
+      }));
+    }
   }
 
   *elementsIterator(): IterableIterator<NativeElement> {

@@ -220,15 +220,21 @@ export class SequenceIndex {
 
   /** Batch visibility updates by affected chunks, not by individual tree splice. */
   hide(targets: readonly string[]): SequenceIndex {
-    const affected = new Map<Chunk, Set<number>>();
-    for (const target of targets) {
-      const location = this.#entries.get(`${target}=`);
+    return this.setVisibility(targets.map((id) => ({ id, visible: false })));
+  }
+
+  setVisibility(updates: readonly Readonly<{ id: string; visible: boolean }>[]): SequenceIndex {
+    const affected = new Map<Chunk, Map<number, boolean>>();
+    for (const update of updates) {
+      const location = this.#entries.get(`${update.id}=`);
       if (!location?.chunk.entries[location.offset]?.element) {
         throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: unknown deletion target");
       }
-      if (!location.chunk.entries[location.offset]!.element!.visible) continue;
-      const offsets = affected.get(location.chunk) ?? new Set<number>();
-      offsets.add(location.offset); affected.set(location.chunk, offsets);
+      const offsets = affected.get(location.chunk) ?? new Map<number, boolean>();
+      if (location.chunk.entries[location.offset]!.element!.visible === update.visible) offsets.delete(location.offset);
+      else offsets.set(location.offset, update.visible);
+      if (offsets.size) affected.set(location.chunk, offsets);
+      else affected.delete(location.chunk);
     }
     const ordered = [...affected].map(([chunk, offsets]) => ({
       chunk, offsets, index: this.locate(chunk.entries[0]!.key)!.before.chunks,
@@ -240,7 +246,7 @@ export class SequenceIndex {
       const group = ordered.slice(i, end).reverse();
       const replacement = group.map(({ chunk, offsets }) => {
         const entries = Object.freeze(chunk.entries.map((entry, offset) => offsets.has(offset)
-          ? Object.freeze({ ...entry, element: Object.freeze({ ...entry.element!, visible: false }) }) : entry));
+          ? Object.freeze({ ...entry, element: Object.freeze({ ...entry.element!, visible: offsets.get(offset)! }) }) : entry));
         return Object.freeze({
           entries, summary: Object.freeze({ ...entries.reduce((sum, entry) => add(sum, measure(entry)), empty), chunks: 1 }),
         });

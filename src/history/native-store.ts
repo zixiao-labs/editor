@@ -34,6 +34,13 @@ export interface NativeAcceptance {
   readonly status: "accepted" | "duplicate";
   readonly availableRevisions: RevisionSet;
 }
+export interface NativeGroupChange {
+  readonly status: "applied" | "partial" | "no-effect";
+  readonly change: CommitReceipt;
+  readonly group: TransactionGroupId;
+  readonly generation: number;
+}
+interface StagedDraft { readonly document: DocumentId; readonly history: NativeHistory; readonly draft: NativeDraft }
 
 interface WriterState {
   readonly native: NativeWriter;
@@ -78,7 +85,8 @@ function revisionSet(entries: readonly RevisionEntry[]): RevisionSet {
  * Internal store/head orchestration, NOT the public HistoryStore factory.
  *
  * Multi-source commits and typed transfers stage complete immutable groups.
- * This is not the public codec, defer queue, undo/retention or Diff implementation.
+ * Activity controls are kernel operations, not session stacks or the public
+ * undo port. Codec, defer, retention and Diff remain separate work.
  */
 export class NativeStore {
   readonly #scope = String(++storeSerial);
@@ -91,6 +99,7 @@ export class NativeStore {
   readonly #streams = new Set<string>();
   readonly #ownedStreams = new Set<string>();
   readonly #heads = new Set<HeadState>();
+  readonly #headStates = new WeakMap<EditingHead, HeadState>();
   readonly #receipts = new WeakSet<CommitReceipt>();
   readonly #cursors = new Map<HistoryCursor, Readonly<{ document: DocumentId; revision: RevisionId; offset: number }>>();
   readonly #events: QueuedEvent[] = [];
@@ -326,6 +335,7 @@ export class NativeStore {
       });
       writer.heads++;
       this.#heads.add(state);
+      this.#headStates.set(head, state);
       return head;
     });
   }
@@ -351,13 +361,61 @@ export class NativeStore {
       edits.push(edit);
       byDocument.set(edit.document, edits);
     }
-    const drafts: { document: DocumentId; history: NativeHistory; draft: NativeDraft }[] = [];
+    const drafts: StagedDraft[] = [];
     for (const [document, edits] of [...byDocument].sort(([a], [b]) => compareIds(a, b))) {
       const history = this.#document(document).clone();
       const draft = history.draft({ at: state.checkpoint.revisions.get(document), writer: state.writer.native, edits, ...meta });
       if (draft) drafts.push({ document, history, draft });
     }
     if (!drafts.length) return this.#receipt(state, state.checkpoint.revisions, [], [], "commit", meta.origin, false);
+    return this.#publishDrafts(state, drafts, "commit", meta.origin);
+  }
+
+  setGroupActive(input: { head: EditingHead; expect: HeadCheckpoint; group: TransactionGroupId; active: boolean }): NativeGroupChange {
+    return this.#write(() => {
+      const { head, expect, group, active } = input;
+      const state = this.#headStates.get(head);
+      if (!state) throw new EditorError("DIFFERENT_ATOMIC_DOMAIN", "DIFFERENT_ATOMIC_DOMAIN: control head belongs to another store");
+      this.#expect(state, expect);
+      const manifest = this.group(group);
+      if (typeof active !== "boolean") throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: control activity must be boolean");
+      const goals: { document: DocumentId; id: string; desired: boolean; before: boolean }[] = [];
+      const drafts: StagedDraft[] = manifest.members.map((member) => {
+        this.#member(state, member.document);
+        const history = this.#document(member.document).clone();
+        const at = state.checkpoint.revisions.get(member.document);
+        const original = history.transaction(member.transaction);
+        const draft = history.controlDraft({ at, writer: state.writer.native, member: member.transaction, active });
+        const order = history.order(at);
+        for (const effect of original.effects) {
+          const ids = effect.kind === "insert" ? [effect.id] : effect.targets;
+          for (const id of ids) goals.push({
+            document: member.document, id, desired: effect.kind === "insert" ? active : !active,
+            before: order.guard(id)!.visible,
+          });
+        }
+        return { document: member.document, history, draft };
+      });
+      const change = this.#publishDrafts(state, drafts, active ? "redo" : "undo", Object.freeze({ kind: active ? "redo" : "undo" }));
+      const orders = new Map(manifest.members.map((member) => [
+        member.document, this.#document(member.document).order(change.after.revisions.get(member.document)),
+      ]));
+      let changed = 0, blocked = 0;
+      for (const goal of goals) {
+        const visible = orders.get(goal.document)!.guard(goal.id)!.visible;
+        if (visible !== goal.before) changed++;
+        if (visible !== goal.desired) blocked++;
+      }
+      return Object.freeze({
+        status: changed === 0 ? "no-effect" : blocked ? "partial" : "applied",
+        change, group, generation: drafts[0]!.draft.transaction.control!.generation,
+      });
+    });
+  }
+
+  #publishDrafts(
+    state: HeadState, drafts: readonly StagedDraft[], reason: "commit" | "undo" | "redo", origin: HeadChangeEvent["origin"],
+  ): CommitReceipt {
     const allocation = state.writer.native.plan(drafts.length);
     const manifest = createManifest(drafts.map(({ document, history, draft }, i) => ({
       document, base: history.root.base, root: history.root.id, transaction: allocation.ids[i]!,
@@ -368,7 +426,7 @@ export class NativeStore {
     const groups = new Map(this.#groups);
     this.#registerGroup(groups, manifest);
     const histories = drafts.map(({ document, history, draft }, i) => {
-      const tx = history.finalize(draft, allocation.ids[i]!, manifest.id);
+      const tx = history.finalize(draft, allocation.ids[i]!, manifest.id, allocation.ids[0]!);
       this.#checkTransactionOwner(document, tx.id);
       history.accept([tx]);
       documents.set(document, history); owners.set(tx.id, document);
@@ -391,7 +449,7 @@ export class NativeStore {
     for (const { document, history } of drafts) this.#documents.set(document, history);
     for (const member of manifest.members) this.#transactionDocuments.set(member.transaction, member.document);
     this.#groups.set(manifest.id, manifest);
-    return this.#receipt(state, revisions, manifest.members.map((member) => member.document), allocation.ids, "commit", meta.origin, true);
+    return this.#receipt(state, revisions, manifest.members.map((member) => member.document), allocation.ids, reason, origin, true);
   }
 
   #move(state: HeadState, expect: HeadCheckpoint, input: RevisionSet, reason: "merge" | "checkout"): CommitReceipt {
@@ -649,7 +707,7 @@ export class NativeStore {
     const tx = history.transaction(id);
     return Object.freeze({
       id, document, group: tx.group, dependencies: tx.depends,
-      operations: Object.freeze(tx.effects.map((_, ordinal) => operationId(ordinalId(id, ordinal)))),
+      operations: Object.freeze(tx.control ? [operationId(ordinalId(id, 0))] : tx.effects.map((_, ordinal) => operationId(ordinalId(id, ordinal)))),
       actor: tx.actor, origin: tx.origin, ...(tx.attribution === undefined ? {} : { attribution: tx.attribution }),
       before: history.revision(tx.depends), after: history.revision([id]),
     });

@@ -56,6 +56,7 @@ export interface TextSnapshot extends Disposable {
   readonly revision: RevisionId;
   readonly lengthUtf16: number;
   text(): string;
+  readUtf16(start: number, end: number): string;
   pointUtf16(offset: number): TextPoint;
   pointUtf8(offset: number): TextPoint;
   pointScalar(offset: number): TextPoint;

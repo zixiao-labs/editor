@@ -60,7 +60,7 @@ Node `crypto` 只在独立测试数据生成命令中使用，不进入源码或
 
 ## 包体门禁
 
-原 G1 基础入口只有身份/错误运行时；当前 root 增加通用后端接入层，
+原 G1 基础入口只有身份/错误运行时；当前 root 增加通用后端接入层和只读文本适配器，
 仍不能代表完整默认 CRDT/Diff 包体。root 不得静态引入 parser/font/WASM/GPU/playground。
 为后续 P2–P4 设置 root ESM **128 KiB gzip 报警预算**，超出需说明实测原因及取舍，
 不得截断代码。可选入口与资产预算在选择各依赖时建立，不伪造尚无产物的数字。
@@ -71,15 +71,16 @@ Node `crypto` 只在独立测试数据生成命令中使用，不进入源码或
 
 | 入口 | JS bytes / gzip | 声明闭包 bytes / gzip |
 | --- | --- | --- |
-| root | 28,644 / 6,887 | 32,445 / 8,629 |
-| `/collaboration` | 0 / 20 | 27,030 / 7,039 |
-| `/languages` | 0 / 20 | 25,900 / 6,712 |
-| `/lsp` | 0 / 20 | 29,028 / 7,390 |
-| `/shaping` | 0 / 20 | 27,552 / 7,188 |
-| `/vgpu` | 0 / 20 | 30,989 / 8,345 |
-| `/browser` | 0 / 20 | 27,688 / 7,277 |
+| root | 36,500 / 8,627 | 35,325 / 9,686 |
+| `/collaboration` | 0 / 20 | 27,119 / 7,056 |
+| `/languages` | 0 / 20 | 25,989 / 6,727 |
+| `/lsp` | 0 / 20 | 29,117 / 7,406 |
+| `/shaping` | 0 / 20 | 30,832 / 8,163 |
+| `/vgpu` | 0 / 20 | 34,700 / 9,449 |
+| `/browser` | 0 / 20 | 30,872 / 8,226 |
 
-对比原 root JS 1,949 / 802，本轮因公开接入层增加 runtime；仍低于 128 KiB gzip 预算。
+前轮 root JS 为 28,644 / 6,887；本轮只读适配增加 7,856 JS bytes / 1,740 gzip bytes，
+仍低于 128 KiB gzip 预算。最早仅身份/错误的基线为 1,949 / 802。
 旧单入口声明与现在共享 chunk 的闭包大小不可直接比较。
 空文件 gzip 20 bytes 是压缩格式开销，不是实际适配器。
 consumer 检查包含 root gzip 预算与六个子入口无运行时导出的门禁；
@@ -116,10 +117,20 @@ counter plan 不使用额外随机流。内部模块仍未入包，七入口体�
 公开 `defineHistoryBackend`/context SDK/facade 没有新增依赖或 Node/DOM API，
 不导入 native CRDT/rope/SumTree。`package.json` 只扩展 type fixture 命令，
 dependency、lock 与七入口 export map 未改；root 的 runtime 导出按用户确认扩展。
-上表是这轮重新 build/measure 的结果，不含完整默认内核。
+该轮 root 测量为 28,644 / 6,887；上表已更新为随后只读文本源轮结果，仍不含完整默认内核。
 
 consumer 门禁发现旧 regex 将错误字符串末尾的 `import"` 当成 JS 依赖；
 现在用 Node VM module parser 检查静态 import/re-export 并带真实依赖负对照，
 继续禁止 dynamic loading，另检查无 native 内核 markers。
 `--experimental-vm-modules` 仅用于 consumer 测试子进程的语法解析，可能输出
 ExperimentalWarning；不是生产库或产品运行时要求，生产 Node ESM smoke 不带该 flag。
+
+### 活性控制与外部只读文本源
+
+默认活动 maps、delete tags 和受影响 chunk 更新复用既有 SumTree/OrderedMap，无新依赖。
+公开只读适配器只依赖 ES 与已有 Unicode helper，不导入默认 CRDT、TextRope 或 SumTree；
+无 DOM/Node、网络或额外 WASM/资产。manifest、lock、工具版本与七入口 export map 未改。
+本轮只扩展库自己定义的 shaping/vgpu 类型，没有选择/安装 vendor vgpu 包、调用其 API
+或声称 GPU 绘制通过，供应商文档/能力与资产审查仍留给真实适配器实施阶段。
+上表由 `pnpm build` 后的 `pnpm measure:package` 实测，consumer 检查 root 仍无 native
+markers/外部依赖、六个子入口仍无 runtime exports。内核活性控制尚未入公开 root。

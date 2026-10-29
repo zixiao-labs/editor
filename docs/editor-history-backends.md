@@ -144,8 +144,8 @@ open 绑定一个公开 head，接入层传给 provider 对应的原始 head：
 - head/receipt/token 归属和生命周期由接入层检查；原效果可控域、因果前提、
   远端意图保留和 partial/no-effect 的判定由后端负责，不按字符串相等猜测。
 
-不指定 generation/ID winner、奇偶 count 或某个操作图扩展。默认 FugueMax 可以以后
-实现自己的活性寄存器 adapter，另一后端可以使用另一种符合语义的机制。
+不指定 generation/ID winner、奇偶 count 或某个操作图扩展。默认 FugueMax 的内部
+活性寄存器现已实现，公开 adapter 仍待完整 provider 接通；另一后端可使用不同的合规机制。
 session 的 undo 栈、命令分组、redo 清理和 selection restoration 仍是上层职责。
 尚未实现的默认 session 工厂必须先检查能力；不能把不支持伪装成 empty undo 栈。
 defer 能力同样在调用 provider 前检查，不支持报 `UNSUPPORTED_CAPABILITY`。
@@ -160,7 +160,9 @@ defer 能力同样在调用 provider 前检查，不支持报 `UNSUPPORTED_CAPAB
 这不证明产品提供的 CRDT 收敛、持久化、跨进程协议或完整 undo 正确；
 后端作者还须执行符合 D1–D10 的独立模型/并发/资源/安全验收。
 默认 NativeHistory/NativeStore 的原有独立差分仍保留，它们没有为了“可注入”而换算法、
-丢弃墓碑或公开不完整 factory。没有实现 DeltaDB、Git 集成、session/view 或默认 undo。
+丢弃墓碑或公开不完整 factory。内部 group 控制另有独立差分，但未接默认公开 undo port。
+没有实现 DeltaDB、Git 集成、session/view。仅需外部 buffer 的只读模式不用实现完整后端，
+直接使用 [TextSource](./editor-text-sources.md)，不强制引入 CRDT/rope/SumTree。
 
 ## 8. 本轮新增公开设计输入
 

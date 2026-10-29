@@ -177,6 +177,8 @@ undo/redo 生成一个新的 `SetGroupActive(group, generation, active)` 控制�
 
 每 group 的 register 选择已纳入 revision 的最大 `(generation, control operation ID)`；
 generation 是已观察该 group 最大值 + 1，ID 是固定排序，绝不是墙钟。
+默认 native 的具体化：控制组所有文档共用首个规范 document 成员的事务 ID（ordinal 0）
+作为 operation tie key，而不是各自成员 ID。generation 只从创作时的精确 revision 读取。
 本地会话按顺序控制自己拥有的组；并发控制依然有确定性赢家，不按先到拒绝
 导致副本各自锁死。controller 绑定原 group 的 undo domain；身份不是认证，
 网络授权由产品负责。undo 域只用于授权/栈所属，不强迫发布同域的其他历史。
@@ -411,5 +413,23 @@ typed acceptance 一起暂存所有源、group/transaction registry 和 caches�
 规格模型；另有三源/三 head seeded 状态机、半组负对照、跨组环、不一致 before、
 整组超预算/后源损坏回滚及 counter 不消耗。详见
 [group 设计、typed 边界与证据](./editor-transaction-groups.md)。
-未实现 public wire codec/defer、生产活性寄存器/undo、pin/位置导出、Diff 或公开工厂；
+该 group 轮结束时未实现 public wire codec/defer、生产活性寄存器/undo、
+pin/位置导出、Diff 或公开工厂；
 没有 durable ACK、真实多进程网络或整体大历史性能验收。
+
+## 13. 默认活性寄存器实现进展
+
+已接入 revision-local activity/original-group 持久 maps、create ownership、独立 delete tags、
+active delete counts 与受影响区间/chunk 更新。控制按本节前述 generation/shared-ID 规则
+选择 winner；旧 cuts 不读取全局最新，隐藏 creator 不遍历隐藏其后代。
+`NativeStore` 控制组与原始组成员完全一致，经同一暂存/manifest/预算/闭包路径原子发布；
+typed 接受拒绝不一致控制和缩成 singleton 的半控制组。no-effect 控制仍是真实新历史。
+
+默认 undo domain 当前是非恢复 writer stream + actor/replica，不提供同 actor 新 stream
+接管旧 undo 的承诺，也不是网络认证。内核没有 session 栈，不对外开放任意旧组选择性撤销。
+独立模型 seeded 差分、跨源相反 ID 次序 mutant 与增量结构证据见
+[group 活性设计](./editor-transaction-groups.md#7-默认-native-group-活性寄存器)。
+
+该机制不强迫完整产品后端照搬；外部只读文本源更不需要 CRDT/rope/history，
+见 API D12。仍待完成公开 native undo adapter、codec/defer、retention、Diff 和完整工厂；
+实际 browser/GPU/session 行为与性能不由内核差分测试代替。

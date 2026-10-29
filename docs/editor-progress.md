@@ -15,7 +15,11 @@
 不消耗 writer counters，不扩大固定 head 成员或传输域。
 **用户已确认开放 CRDT/历史后端替换，公开接入层已实现**：完整产品工厂、协议描述、
 身份/opaque 隔离、资源归属及可选 selective-undo/defer 能力，不再把 FugueMax 当作公共前提。
-默认历史 store、wire codec 与生产 undo 控制仍待完成，P3–P8 未实现；
+**默认 group 活性内核已接通**：revision-local generation/shared-ID winner、独立删除标签、
+跨文档原子控制和 meaningful no-effect 历史；不是 session undo 栈。
+**外部只读文本源已公开**：产品 gap buffer/持久快照无需 history/rope/SumTree；
+兼容 history head 可接到同一有界读端口。只读 shaping/view 仍只有类型。
+默认完整历史 provider、wire codec、公开 native undo adapter 仍待完成，P3–P8 未实现；
 内部生产差分通过不能当成完整生产历史验收，或把类型当可调用工厂。
 
 上一轮基线：用户恢复四份原设计文档后的 `b688a6e84f3a98d4ea51aaaa57288aa9462436ba`。
@@ -26,8 +30,10 @@ heads 基线仍为 `73e3c38`，前轮事务实现和文档尚未提交，已完�
 本轮存储基线仍为 `73e3c38` 加前述未提交实现；不丢弃之前的源码/文档改动。
 CRDT 索引轮仍基于相同 HEAD 及未提交存储实现，全部保留；无新增外部参考输入。
 group 轮仍为 `73e3c38` 加前述未提交实现，未重置既有改动或引入外部参考资料。
-当前后端轮基线是用户提交上述工作后的 `2629761`；切换后工作区干净，已复跑 103 项
+后端轮基线是用户提交上述工作后的 `2629761`；切换后工作区干净，已复跑 103 项
 及 typecheck。原拟默认活性寄存器工作尚未改 runtime，就按用户确认优先补后端替换边界。
+当前活性/只读文本源轮基线是用户提交后端接入层后的 `1428514`；工作区初始干净，
+已先复跑 114 项及 typecheck。没有回退或覆盖用户提交。
 Workflow 仍为 `maintainer-original`，仅 editor；原设计线程是用户指定的继续工作来源。
 此前未读取参考实现/研究目录/其他 worktree；本轮用户另指定 Zed 公开 Rope/SumTree
 文章（含文内示意片段）作为设计输入，未跟进其仓库、测试或视频，未搬运其中实现。
@@ -38,7 +44,7 @@ Workflow 仍为 `maintainer-original`，仅 editor；原设计线程是用户指
 | G0 | 完成规格与独立验证设计 | `editor-crdt-design.md`、规格模型、枚举 oracle、负对照；不是形式化证明 |
 | G1 核心/协作 | 契约与工具门禁通过 | branded IDs、head/session checkpoints、receipt/Diff、协作类型；root 另有公开后端接入运行时 |
 | G1 集成类型 | 本轮契约/入口门禁通过 | 语言/LSP/shaping/vgpu/browser、六个 type-only 子入口、无 DOM/DOM consumer、12 个规范代码块与负对照；运行时依赖审查仍留给安装阶段 |
-| P2 | 进行中，存储/group 与公开接入层已接入 | 产品后端可替换，默认内核仍内部；默认 undo 控制、安全 codec、pin/位置导出与完整工厂待完成 |
+| P2 | 进行中，存储/group/活性和公开接入层已接入 | 产品后端与只读存储可替换；默认内核仍内部，公开 undo adapter、安全 codec、pin/位置导出与完整工厂待完成 |
 | P3/P4 | 未开始 | session/undo/MultiBuffer、同步/presence、结构化与 unified Agent Diff |
 | P5–P8 | 未开始 | 增量语法/真实 LSP、字体与 vgpu、输入/读屏、Diff view/playground、完整交付 |
 
@@ -496,13 +502,67 @@ session/view 均未因此完成。没有大历史性能/内存、真实 browser/
 consumer 的 VM flag 只用于测试子进程解析，生产库不需要实验 flag 或 Node API。
 用法和具体边界见 [后端协议](./editor-history-backends.md)。未 commit、push、发布、PR 或合入。
 
+## 本轮变更：默认 group 活性与外部只读文本源
+
+- `NativeHistory` 为每个精确 revision 保存 original-group/activity 持久 maps；
+  控制事务无 text effects，generation 严格从自身 depends 闭包 winner 加一。
+  register 比较 `(generation, shared representative ID)`；多文档共用首规范成员 ID，
+  不用各源不同成员 ID 导致 split winner，也不读 store-global 最新值。
+- `FugueSequence` 保留 creator、独立 delete tags、active delete count 与 group effect
+  持久列表；只更新该组受影响元素/区间/chunks，不递归隐藏其他 creator 的远端后代，
+  不移除 tombstones，不在 redo 复制新 IDs。旧 cuts/快照/归因保持不变。
+- `NativeStore.setGroupActive` 与 commit 共用原子 publication；控制组恰好覆盖原组文档，
+  校验 observed original/domain/generation、整组一致性/manifest/闭包和预算后发布。
+  结果按 effect identity 报 applied/partial/no-effect；no-effect 控制仍产生真实历史。
+  当前 domain 是非恢复 writer stream + actor/replica，不是认证或 session 持久化。
+- 根入口新增 `createTextSource`/`textSourceFromHead` 与独立的 read version/point/range。
+  snapshot lease 保留旧文本；versioned lease 前后检查 mutation/ABA，拒绝撕裂读。
+  source 借用产品 buffer/head，仅管理读 leases 和订阅；活动 read 阻止关闭 source。
+  读取有界、Unicode scalar-safe、通知合并；历史增加 `TextSnapshot.readUtf16`，
+  适配不需要展平全文/复制到第二份存储，不拉入默认 rope/SumTree/CRDT 到公开 root。
+- `/shaping` 与 `/vgpu` 增加只读布局/view 类型，不要求 session/history；只读坐标不能
+  进入 edit/history/输入桥。快速/完整模式由产品显式替换 source，不暗中迁移旧坐标、
+  追补未记录的历史或销毁任一 owner。API D12 与只读接入文档记录该授权扩展。
+- 新增 **15 项 runtime 测试**：7 个 group 内核单测、2 个独立模型差分/负对照、
+  6 个文本源单测；沿用真实双侧 UTF-16 gap buffer、原 history 独立规格模型和包级门禁。
+  控制测试先因缺方法失败。补 emoji adapter 反例后发现 raw 探测与 history scalar-safe
+  读取不兼容，修为小窗口扩展/裁剪，未放宽原 range 合同。
+  visibility 批次重复更新回到原值的反例也先失败，已修成最后值生效且净无变化复用旧根。
+- 三隔离 cuts 每 seed 8 × 32 步 edits/controls/joins 对照独立 replay，比较文本、
+  身份与归因并保留旧 cuts；跨源 tie fixture 令各源成员 ID 排序相反，own-ID mutant
+  被检出。typed 完整/重复控制 roundtrip、一致 singleton 伪装半控制组、坏后源均已测。
+  32,768-root 单元素控制禁止整图/全序枚举且 order nodes 共享 >90%；
+  100k 文本局部读禁止展平大 rope。以上不是整笔 commit 或大历史性能基准。
+
+### 本轮实际验证
+
+Node 24.15.0、pnpm 12.15.0、HEAD `1428514`。无新增依赖/工具升级；
+manifest、lock、export map 未改。公共接口按用户授权增加只读文本接缝与有界 history 读取。
+
+| 命令 | 实际结果 |
+| --- | --- |
+| `pnpm install --frozen-lockfile` | 通过，lock 未改 |
+| `pnpm test` | 23 文件、129 项通过，较基线新增 15 项 |
+| `pnpm test:types` | ES-only 三 fixture、DOM 一 fixture 通过，含只读坐标/编辑输入隔离负例 |
+| `pnpm typecheck` | ES-only/DOM/isolated declarations 三配置通过 |
+| `SEED=0/424242/4294967295 pnpm test:crdt`（分别执行） | 各 30 项通过 |
+| `pnpm build`、`pnpm test:consumer` | 七入口构建、两类包名 consumer 与 5 项门禁通过 |
+| `pnpm measure:package` | root JS 36,500 bytes / gzip 8,627；不含 native/rope/SumTree，六子入口仍为空 runtime |
+| `git diff --check` | 通过 |
+
+没有真实 shaper/GPU/browser/IME/LSP、读屏或跨进程/共享内存验收；未选择/安装 vgpu runtime，
+只读 view 仍不可调用。没有替代完整生产后端或默认公开工厂，session undo 栈、
+wire codec/defer、pin/位置导出和完整 Diff 尚未实现。
+设计与限制见 [group 活性](./editor-transaction-groups.md#7-默认-native-group-活性寄存器)、
+[文本源](./editor-text-sources.md)。未 commit、push、发布、PR 或合入。
+
 ## 下一项
 
-回到默认后端的 group 效果活性寄存器：revision-local 的 create/delete 活性、控制事务
-的 generation/固定 ID 平局、跨源控制原子性和保留远端后代/其他 active delete tags。
-这是默认后端内部机制，不要求产品后端照搬；先做内核与独立模型差分，再接公开 undo port，
-不冒充已实现 session undo 栈。之后继续安全 codec/defer、pin/position 保留及完整 Diff，
-最后才发布满足全部契约的默认 backend/factory。
+继续默认安全 codec/defer、pin/position 保留及完整 Diff，接公开 native undo port，
+最后发布满足全部契约的默认 backend/factory；不靠 not-implemented 方法提前开放。
+会话分组/undo/redo 栈与选区恢复仍是后续独立实现。
+产品仅渲染快速模式已经可以独立适配存储，真实 shaping/GPU view 在集成阶段另行实现，
+不将本轮有界读端口或类型检查当作绘制成功。
 核心与集成分别保持无 DOM/DOM 的声明边界；P2 的生产实现必须与规格模型和独立
 oracle 差分，不能把 `tests/crdt/support` 移到生产或以两份同算法输出相等结案。
 如果算法扩展或依赖能力发现与锁定 API 的真实冲突，再具体报告，不泛泛等待“继续”。

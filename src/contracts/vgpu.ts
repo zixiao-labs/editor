@@ -2,7 +2,8 @@ import type { DiffReport, Disposable, EditorSession, TextPoint } from "./core.js
 import type { DocumentId, RevisionId } from "../identity.js";
 import type { EditorError } from "../errors.js";
 import type { DiffSyntaxProvider } from "./languages.js";
-import type { EditorGeometry, LayoutEngine, VisualPoint } from "./shaping.js";
+import type { EditorGeometry, LayoutEngine, TextReadLayoutHit, LayoutGeneration, VisualPoint } from "./shaping.js";
+import type { TextSource } from "./text-source.js";
 
 export type VgpuViewState =
   | Readonly<{ kind: "loading-font" | "ready" | "disposed" }>
@@ -14,6 +15,12 @@ export interface VgpuView extends Disposable {
   recover(): Promise<void>;
 }
 export interface VgpuEditorView extends VgpuView, EditorGeometry {}
+export interface VgpuTextView extends VgpuView {
+  readonly generation: LayoutGeneration;
+  hitTest(point: VisualPoint): TextReadLayoutHit | null;
+  /** Borrow the new source; do not destroy either product buffer/history owner. */
+  setSource(source: TextSource): void;
+}
 export interface DiffViewHit {
   readonly document: DocumentId;
   readonly side: "before" | "after";
@@ -25,6 +32,9 @@ export interface VgpuDiffView extends VgpuView {
   onActivate(listener: (hit: DiffViewHit) => void): Disposable;
 }
 export interface VgpuFactories {
+  mountVgpuTextView(input: {
+    source: TextSource; element: HTMLCanvasElement; layout: LayoutEngine;
+  }): Promise<VgpuTextView>;
   mountVgpuView(input: {
     session: EditorSession; element: HTMLCanvasElement; layout: LayoutEngine;
   }): Promise<VgpuEditorView>;

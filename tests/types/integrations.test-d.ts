@@ -1,6 +1,6 @@
 import { expectTypeOf } from "@lightning-js/lightning";
 import type {
-  CancellationSignal, EditingHead, HeadCheckpoint, ProjectionPoint, TextPoint, TextSnapshot,
+  CancellationSignal, EditingHead, HeadCheckpoint, ProjectionPoint, TextPoint, TextSnapshot, TextReadSnapshot,
 } from "../../src/index.js";
 import type { CollaborationFactories } from "../../src/collaboration.js";
 import type {
@@ -19,6 +19,7 @@ declare const lspApi: LspFactories;
 declare const shaping: ShapingFactories;
 declare const head: EditingHead;
 declare const source: TextSnapshot;
+declare const external: TextReadSnapshot;
 declare const transport: RpcTransport;
 declare const shaper: Shaper;
 declare const fallback: readonly LoadedFont[];
@@ -85,6 +86,14 @@ async function shapingWorkflow(): Promise<void> {
     shaper, fonts: { primary: plex, fallback }, features: { liga: true, calt: true },
   });
   layout.setOpenTypeFeatures({ liga: false, calt: false });
+  const rendered = await layout.layoutText({
+    source: external, viewport: { widthCssPx: 800, heightCssPx: 600, scrollXCssPx: 0, scrollYCssPx: 0 },
+  });
+  expectTypeOf(rendered.version).toEqualTypeOf<typeof external.version>();
+  // @ts-expect-error A render-only point is not a causal/history edit point.
+  const notHistory: TextPoint = external.pointUtf16(0);
+  void notHistory;
+  rendered.dispose();
   const frame = await layout.layout({
     source,
     viewport: { widthCssPx: 800, heightCssPx: 600, scrollXCssPx: 0, scrollYCssPx: 0 },

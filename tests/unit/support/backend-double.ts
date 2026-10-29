@@ -52,6 +52,7 @@ export function backendDouble(name = "fixture:one", undo = false, deferred = fal
         const point = (offset: number, unit: "utf16" | "utf8" | "scalar") => Object.freeze({ ...entry, offset, unit });
         return Object.freeze({
           ...entry, lengthUtf16: text.length, text: () => text,
+          readUtf16: (start, end) => text.slice(start, end),
           pointUtf16: (offset) => point(offset, "utf16"), pointUtf8: (offset) => point(offset, "utf8"),
           pointScalar: (offset) => point(offset, "scalar"), convertPoint: (input, unit) => point(input.offset, unit),
           rangeUtf16: (start, end) => Object.freeze({ ...entry, start, end, unit: "utf16" }),

@@ -5,6 +5,7 @@ import {
   type TextPoint, type ProjectionPoint, type HeadCheckpoint, type SessionCheckpoint,
   type CoreFactories, type CollaborationFactories, type HistoryStore, type CommitReceipt,
   type SessionCommitReceipt, type DiffInput, type SelectionSnapshot, type CancellationSignal,
+  createTextSource, textSourceFromHead, type TextReadVersion,
 } from "../../src/index.js";
 
 expectTypeOf(documentId("doc")).toEqualTypeOf<DocumentId>();
@@ -37,6 +38,23 @@ const change = head.commit({
   edits: [{ document, range: snapshot.rangeUtf16(10, 11), text: "2" }],
   origin: { kind: "agent", label: "one-edit" },
 });
+const external = createTextSource({
+  snapshot: () => ({ kind: "snapshot", lengthUtf16: 2, readUtf16: (a, b) => "AB".slice(a, b), dispose() {} }),
+  onChange: () => ({ dispose() {} }),
+});
+const readonlyText = external.snapshot();
+expectTypeOf(readonlyText.version).toEqualTypeOf<TextReadVersion>();
+// @ts-expect-error Render versions are not causal revisions.
+const causal: RevisionId = readonlyText.version;
+head.commit({
+  expect: head.checkpoint(), origin: { kind: "product" },
+  // @ts-expect-error Render ranges cannot be used as source edit ranges.
+  edits: [{ document, range: readonlyText.rangeUtf16(0, 1), text: "x" }],
+});
+// @ts-expect-error Render points cannot be converted as history coordinates.
+snapshot.convertPoint(readonlyText.pointUtf16(0), "utf8");
+textSourceFromHead(head, document);
+void causal;
 const session = api.createEditorSession({ target: head.document(document) });
 session.selections.set({
   expect: session.selections.read().version,

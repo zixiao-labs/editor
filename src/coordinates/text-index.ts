@@ -17,6 +17,7 @@ export class TextIndex {
   }
 
   get text(): string { return this.#rope.toString(); }
+  readUtf16(start: number, end: number): string { return this.#rope.slice(start, end).toString(); }
   length(unit: TextUnit): number { return this.#rope.length(unit); }
   scalarAt(offset: number, unit: TextUnit): number { return this.#rope.scalarAt(offset, unit); }
   offsetAt(scalar: number, unit: TextUnit): number { return this.#rope.offsetAt(scalar, unit); }

@@ -1,6 +1,6 @@
 # Editor 分阶段实施计划
 
-状态：G0/G1 门禁已通过。P2 已有内部源视图、FugueMax 持久索引、store/head 和原子 group；按用户后续确认，公开完整产品后端接入层及隔离/格式/能力边界。默认 native store、undo 控制和 wire codec 仍待完成。当前实测、剩余事项见 [实施记录](./editor-progress.md)，后端边界见 API D11；不把下面的验收项当作已有测试结果。
+状态：G0/G1 门禁已通过。P2 已有内部源视图、FugueMax 持久索引、store/head、原子 group 与活性控制；按用户后续确认，公开完整产品后端接入及外部只读文本源。默认完整 native provider、session undo 和 wire codec 仍待完成。当前实测、剩余事项见 [实施记录](./editor-progress.md)，接入边界见 API D11/D12；不把下面的验收项当作已有测试结果。
 
 ## 1. 工作流、基线与阶段边界
 
@@ -108,12 +108,15 @@ cursor、chunked rope 已接入实际写入与坐标/快照，并检查结构共
 因果闭包/拓扑排序、历史 Map 浅复制和 rope 等值扫描仍需后续性能工作；
 不把这些成本掩盖在 rope primitive 的复杂度后面。多文档 group/闭包/域边界及 typed
 完整/delta 传递也已接通，包含跨组环与 before 一致性检查、精确缺成员报告和独立差分。
-这不是安全 codec 或公共 `createHistoryStore`，尚无生产 undo 控制、pending 与 pin/
+这不是安全 codec 或公共 `createHistoryStore`，尚无 pending 与 pin/
 位置导出。用户随后明确要求开放可替换历史后端，已先实现公开产品接入层：
 完整 implementation、描述/命名空间、opaque 值、格式/能力协商与生命周期有统一边界；
 上层依赖 `HistoryStore/EditingHead`，不依赖 native 类。backend-owned selective-undo
-端口不规定内部寄存器算法，不等于默认 undo 已完成。
-下一项回到默认后端的 group 活性寄存器，再继续 codec/defer/retention。
+端口不规定内部寄存器算法。默认 group 活性内核现已接通，包括精确 revision generation、
+共享代表 tie key、独立删除标签、跨源控制原子性和 no-effect 真实历史；session 栈尚未实现。
+外部文本源已支持产品 gap buffer/persistent snapshot，只读布局不要求使用完整历史；
+任意兼容 head 也能有界读取到同一接缝。只读 shaping/view 尚只有类型，不冒充 GPU runtime。
+下一项继续 codec/defer/retention，再结合 Diff 补齐默认 provider 和公开 undo adapter。
 默认公共工厂还受 P4 `HistoryStore.diff` 的完整契约约束，不导出缺方法工厂
 绕过公共验收目标；下列整体交付与退出条件仍未满足。
 

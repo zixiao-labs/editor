@@ -56,6 +56,24 @@ export function validateGroups(context: GroupContext): void {
         if (dependency) edges.add(dependency.group.id);
       }
     }
+    const known = group.members.map((member) => {
+      const history = context.documents.get(member.document);
+      return history?.hasTransaction(member.transaction) ? history.transaction(member.transaction) : undefined;
+    });
+    const first = known.find((tx) => tx?.control)?.control;
+    if (first) {
+      const target = context.groups.get(first.target);
+      if (known.some((tx) => tx && (!tx.control || tx.control.target !== first.target ||
+        tx.control.generation !== first.generation || tx.control.active !== first.active || tx.control.order !== first.order)) ||
+        first.order !== group.members[0]!.transaction) {
+        throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: control group members disagree");
+      }
+      if (target && (target.members.length !== group.members.length ||
+        target.members.some((member, i) => member.document !== group.members[i]!.document ||
+          (known[i] && known[i]!.control!.member !== member.transaction)))) {
+        throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: control must cover the exact original group");
+      }
+    }
     dependencies.set(group.id, edges);
   }
   // Per-document acyclicity alone is insufficient: two otherwise valid graphs

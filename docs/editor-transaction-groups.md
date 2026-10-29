@@ -1,7 +1,8 @@
 # P2：多文档原子 group
 
-状态：内部 `NativeStore` 已支持本地跨源提交、manifest、group-closed 版本边界和
-typed bundle 传递。不是公开 `HistoryStore`/`HistoryBundle`、安全 wire codec 或同步端口。
+状态：内部 `NativeStore` 已支持本地跨源提交、manifest、group-closed 版本边界、
+typed bundle 传递及原子 group 活性控制。不是公开 `HistoryStore`/`HistoryBundle`、
+安全 wire codec、session undo 栈或同步端口。
 只承诺当前 JS 进程内完整接受/发布，不承诺 durable ACK、远端同时可见或分布式提交。
 
 ## 1. 身份与不可变 manifest
@@ -80,7 +81,7 @@ merge 仍允许 group-closed 文档子集，checkout 仍要求完整且相同的
 3. `NativeWriter.plan(count)` 得到暂定连续 IDs；形成 group manifest，再由对应
    staging history `finalize` 各 draft。只有其所属 history 可以 finalize 该 draft。
 4. 各源 typed effects 独立验证；检查整个 envelope（含 manifests、root/target refs）
-   的 **8 MiB / 100,000 scalar insert/delete effects** 预算。metadata 仍逐成员验证
+   的 **8 MiB / 100,000 scalar insert/delete effects 或控制记录** 预算。metadata 仍逐成员验证
    16 KiB；不把多文档预算误当作每文档各享一份 8 MiB。
 5. 检查 manifest、group DAG、before 一致性与候选 revision set 的 group closure。
 6. 所有检查完成后 commit writer allocation，连续发布全部源 owner、manifest、transaction
@@ -89,7 +90,8 @@ merge 仍允许 group-closed 文档子集，checkout 仍要求完整且相同的
 
 失败丢弃整个 staging 图和 caches，没有先发布合法文档前缀，也不 rewind 已公开 stream。
 未 commit 的 allocation 可放弃；重复、外来或已 stale 的 allocation 不能消费 counters。
-既有快照/隔离 branches 保留原索引根。所有 no-op 返回原 checkpoint，不发源事件。
+既有快照/隔离 branches 保留原索引根。净 no-op 文本提交返回原 checkpoint，不发源事件；
+活性控制不同，即使 no-effect 也记录新历史（见第 7 节）。
 显式同 revision checkout 的 stamp/lifecycle 规则保持不变。
 
 ## 5. 内部 typed 传递，不冒充 codec
@@ -137,5 +139,71 @@ singleton，其目标仍需通过带齐版本集合的 bundle 表达。
   不把单事务 shrinker 冒充能安全缩减 saved-checkpoint 索引的状态机 reducer。
 
 当前 group/因果校验仍会扫描保留历史与闭包，不宣称整笔 commit O(log n)，也没有完整
-大历史墙钟/内存基准。生产 group 活性寄存器/undo、wire codec/defer、pin/位置导出、
+大历史墙钟/内存基准。session undo 栈/公开 native undo port、wire codec/defer、pin/位置导出、
 Diff/公开工厂和真实 browser/IME/多进程网络仍待后续独立验收。
+
+## 7. 默认 native group 活性寄存器
+
+本节只约束默认后端内核，不要求产品后端采用 generation、delete tags 或 FugueMax。
+公开的 `HistoryUndoProvider` 仍是 opaque capture/apply 端口；当前未把缺 codec/Diff 等能力的
+内部 store 冒充完整 native provider，也未实现 session 分组、redo 栈或选区恢复。
+
+### revision-local 规则
+
+每个原始 effect group 默认 `{ generation: 0, active: true }`。控制事务无文本 effects，
+记录 `{ target, member, generation, active, order }`：
+
+- target 是原始 group，member 是该文档的原始成员事务，必须在 depends 闭包已观察到；
+  不允许以控制组为被控目标，不能通过控制控制操作绕开这条规则。
+- generation 严格等于**这份精确 base revision** 已观察 winner 的 generation + 1；
+  不是 store-global 最新值、writer counter 或墙钟。超过 safe integer 拒绝。
+- register 在该 revision 的控制集合选最大 `(generation, order)`。order 是控制组按 document
+  排序的**首成员 transaction ID**，所有文档共用同一个 tie key。
+  不能使用各文档自己的控制事务 ID：并发控制的成员 ID 排列可能不同，会产生 A 已 undo、
+  B 却 redo 的 split winner。当前每事务只有一个控制，ordinal 固定为 0。
+- undo domain 为原始 writer stream nonce + actor/replica。当前 stream 不支持恢复，
+  新 stream 不能因 actor 标签相同就控制旧组；这不是认证或持久会话恢复机制。
+  共享同一合法 writer 的隔离 heads 可从旧 cuts 发出并发控制。
+
+控制在同一 atomic publication 路径为原始组的**全部且仅这些文档**生成成员；
+manifest 仍含各源完整 before/after/root/base，目标 revision 集仍须 group-closed。
+组内成员必须一致指向同一 target、generation、active、order，并绑定相应原始成员。
+拒绝 text/control 混组、半控制组、伪造代表 ID 及不一致 before；校验失败不消耗 counter、
+不发布任意文档前缀。每个 controller 计一项 operations 预算，而不是因 effects 空就免费。
+
+### 增量 visibility，不删除历史
+
+每个 slot 保留 creator group、独立 delete tags 和 active delete count；每 group 保留
+created/deleted IDs 的持久列表。切换只访问该 group 的 effects 和相关 chunks：
+
+`(根元素或 creator active) && activeDeletes === 0`
+
+隐藏 creator 不递归隐藏其子树，远端 descendants 仍在原全序。撤销删除只关闭自己的
+tag，其他 active 删除仍阻止复活；redo 重新使用原 IDs、文本和创建归因。
+完整 order、tombstones、稳定位置 guards 保留，visibility 变化不会重排其他元素。
+受影响区间合并后从右向左更新 rope，并批量更新 chunks；旧 revision/snapshot 共享旧根。
+
+`NativeStore.setGroupActive` 是内部内核入口：检查 head 归属/CAS/固定成员和 domain，
+暂存所有控制，再统一生成 checkpoint、receipt 和一次 undo/redo 事件。
+结果按 effect identity 的可见性判断，不比较最终字符串：
+
+- 无目标 visibility 改变：`no-effect`；
+- 有改变但部分 effect 仍被其他 creator/delete 活性阻挡：`partial`；
+- 有改变且无受阻目标：`applied`。
+
+即使重复要求 inactive 或所有恢复都被其他 tags 阻挡，控制仍推进 generation，产生真实
+`committed` receipt/stamp/event。这种 no-effect 历史不能按净 no-op 文本编辑规则丢弃。
+
+### 验证证据
+
+native 单测覆盖远端后代、旧 snapshot/guard、redo identity、独立删除标签、旧 base
+generation、交付顺序、错误 domain、控制目标、partial/no-effect、原子事件/receipt、
+typed 完整/重复 roundtrip、不一致成员与半控制组拒绝、控制预算。
+32,768-root 的单元素控制禁止枚举整篇 graph/order，order nodes 共享 >90%；
+这不是完整历史墙钟/内存或整笔 commit 的复杂度保证。
+
+另有独立规格模型差分：三份隔离 causal cuts 每 seed 8 × 32 步 edits/controls/joins，
+逐步比较文本、可见身份、provenance 与旧 cuts，并作冷 typed 导入。
+两文档并发控制 fixture 特意令两源的成员 ID 顺序相反；共享代表 winner 一致，
+改用每源自身 ID 的 mutant 则失败。adapter 只展开依赖与重命名共享 control ID，
+不调用生产寄存器排序或 visibility 规则来生成期望值。

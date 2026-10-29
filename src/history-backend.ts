@@ -131,7 +131,7 @@ function connect(raw: HistoryStoreImplementation,
     return Object.freeze({ status: input.status });
   };
   const snapshot = (inner: TextSnapshot): TextSnapshot => {
-    methods(inner, ["text", "pointUtf16", "pointUtf8", "pointScalar", "convertPoint", "rangeUtf16",
+    methods(inner, ["text", "readUtf16", "pointUtf16", "pointUtf8", "pointScalar", "convertPoint", "rangeUtf16",
       "anchorUtf16", "stableRangeUtf16", "dispose"], "TextSnapshot");
     const revision = inner.revision, document = inner.document, lengthUtf16 = inner.lengthUtf16;
     ids.local("revision", revision);
@@ -139,6 +139,7 @@ function connect(raw: HistoryStoreImplementation,
     return Object.freeze({
       document, revision, lengthUtf16,
       text: () => { held.active(); return inner.text(); },
+      readUtf16: (start, end) => { held.active(); return inner.readUtf16(start, end); },
       pointUtf16: (offset) => { held.active(); return point(inner.pointUtf16(offset)); },
       pointUtf8: (offset) => { held.active(); return point(inner.pointUtf8(offset)); },
       pointScalar: (offset) => { held.active(); return point(inner.pointScalar(offset)); },

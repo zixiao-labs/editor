@@ -3,6 +3,7 @@ import type {
   TextRange, TextSnapshot,
 } from "./core.js";
 import type { ExcerptId, Opaque } from "../identity.js";
+import type { TextReadPoint, TextReadRange, TextReadSnapshot, TextReadVersion } from "./text-source.js";
 
 export type FontId = Opaque<string, "FontId">;
 export type GlyphId = Opaque<number, "GlyphId">;
@@ -22,16 +23,16 @@ export interface ShapedGlyph {
   readonly offsetXFontUnits: number;
   readonly offsetYFontUnits: number;
 }
-export interface ClusterMapping {
+export interface ClusterMapping<Range = TextRange> {
   readonly cluster: GlyphCluster;
-  readonly source: TextRange;
+  readonly source: Range;
   readonly ligatureCaretsFontUnits: readonly number[];
 }
-export interface ShapedRun {
+export interface ShapedRun<Range = TextRange> {
   readonly font: FontId;
   readonly direction: "ltr" | "rtl";
   readonly glyphs: readonly ShapedGlyph[];
-  readonly clusters: readonly ClusterMapping[];
+  readonly clusters: readonly ClusterMapping<Range>[];
 }
 export interface Shaper extends Disposable {
   shape(input: {
@@ -39,6 +40,11 @@ export interface Shaper extends Disposable {
     direction: "ltr" | "rtl"; script: string; language: string;
     features: OpenTypeFeatures; signal?: CancellationSignal;
   }): Promise<ShapedRun>;
+  shapeText(input: {
+    source: TextReadSnapshot; range: TextReadRange; font: LoadedFont;
+    direction: "ltr" | "rtl"; script: string; language: string;
+    features: OpenTypeFeatures; signal?: CancellationSignal;
+  }): Promise<ShapedRun<TextReadRange>>;
 }
 export interface LayoutViewport {
   readonly widthCssPx: number;
@@ -64,11 +70,11 @@ export interface LayoutHit {
 export interface CaretStop extends LayoutHit {
   readonly method: "font" | "grapheme-interpolation" | "boundary";
 }
-export interface PositionedGlyph {
+export interface PositionedGlyph<Range = TextRange> {
   readonly glyph: GlyphId;
   readonly cluster: GlyphCluster;
   readonly font: FontId; // Actual fallback face, not the configured primary's name.
-  readonly source: TextRange;
+  readonly source: Range;
   readonly excerpt?: ExcerptId;
   readonly bounds: VisualRect;
 }
@@ -86,6 +92,18 @@ export interface LayoutSnapshot extends Disposable, EditorGeometry {
     anchor: SourceEndpoint; head: SourceEndpoint;
   }): readonly VisualRect[];
 }
+export interface TextReadLayoutHit {
+  readonly point: TextReadPoint;
+  readonly affinity: Affinity;
+  readonly visual: VisualPoint;
+}
+export interface TextReadLayoutSnapshot extends Disposable {
+  readonly version: TextReadVersion;
+  readonly generation: LayoutGeneration;
+  readonly viewport: LayoutViewport;
+  readonly glyphs: readonly PositionedGlyph<TextReadRange>[];
+  hitTest(point: VisualPoint): TextReadLayoutHit | null;
+}
 export interface LayoutEngine extends Disposable {
   readonly generation: LayoutGeneration;
   setOpenTypeFeatures(features: OpenTypeFeatures): void;
@@ -93,6 +111,9 @@ export interface LayoutEngine extends Disposable {
   layout(input: {
     source: TextSnapshot | ProjectionSnapshot; viewport: LayoutViewport; signal?: CancellationSignal;
   }): Promise<LayoutSnapshot>;
+  layoutText(input: {
+    source: TextReadSnapshot; viewport: LayoutViewport; signal?: CancellationSignal;
+  }): Promise<TextReadLayoutSnapshot>;
 }
 export interface ShapingFactories {
   loadFont(input: {

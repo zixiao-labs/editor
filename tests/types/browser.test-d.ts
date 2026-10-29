@@ -1,5 +1,5 @@
 import { expectTypeOf } from "@lightning-js/lightning";
-import type { CancellationSignal, DiffReport, EditorSession, TextSnapshot } from "../../src/index.js";
+import type { CancellationSignal, DiffReport, EditorSession, TextSnapshot, TextSource } from "../../src/index.js";
 import type { SyntaxService } from "../../src/languages.js";
 import type { LayoutEngine, VisualPoint } from "../../src/shaping.js";
 import type { VgpuFactories, VgpuEditorView } from "../../src/vgpu.js";
@@ -16,11 +16,17 @@ declare const report: DiffReport;
 declare const source: TextSnapshot;
 declare const visual: VisualPoint;
 declare const view: VgpuEditorView;
+declare const externalText: TextSource;
 
 // Native browser cancellation remains structurally compatible with the ES-only core.
 expectTypeOf<AbortSignal>().toExtend<CancellationSignal>();
 
 async function mountWorkflow(): Promise<void> {
+  const readonly = await gpu.mountVgpuTextView({ source: externalText, element: canvas, layout });
+  readonly.setSource(externalText);
+  // @ts-expect-error A render-only view is not an editable session geometry provider.
+  browser.bindBrowserInput({ session, element, geometry: readonly });
+  readonly.dispose();
   const view = await gpu.mountVgpuView({ session, element: canvas, layout });
   const input = browser.bindBrowserInput({ session, element, geometry: view });
   const states = view.onStateChange(state => {

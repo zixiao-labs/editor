@@ -4,3 +4,5 @@ export type * from "./contracts/core.js";
 export type * from "./contracts/collaboration.js";
 export type * from "./contracts/history-backend.js";
 export { defineHistoryBackend, assertHistoryBackendCompatibility, historyStoreFor } from "./history-backend.js";
+export type * from "./contracts/text-source.js";
+export { createTextSource, textSourceFromHead } from "./text-source.js";

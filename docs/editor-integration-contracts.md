@@ -1,6 +1,6 @@
 # G1 集成契约与入口边界
 
-这是 `editor-api.md` D1/D7/D8/D9 的辅助类型交付，不是集成运行时。
+这是 `editor-api.md` D1/D7/D8/D9/D12 的辅助类型交付，不是集成运行时。
 没有安装 parser、LSP server、shaper、字体或 vgpu，也没有宣称它们的能力已验收。
 所有工厂目前只存在于 `*Factories` 类型中；六个子入口的 ESM 为空模块，
 不能将 `import type` 改成可调用工厂的 value import。
@@ -9,12 +9,12 @@
 
 | 公开入口 | 声明依赖 | lib | 当前运行时 |
 | --- | --- | --- | --- |
-| root | identity、errors、core、collaboration | ES2022 | 身份构造器、`EditorError` |
+| root | identity、errors、core、collaboration、history-backend、text-source | ES2022 | 身份/错误、后端接入 SDK、只读文本适配 |
 | `/collaboration` | core、identity、errors | ES2022 | 无 |
 | `/languages` | core、identity | ES2022 | 无 |
 | `/lsp` | core、identity、errors | ES2022 | 无 |
-| `/shaping` | core、identity | ES2022 | 无 |
-| `/vgpu` | core、languages、shaping、identity、errors | ES2022 + DOM | 无 |
+| `/shaping` | core、identity、text-source | ES2022 | 无 |
+| `/vgpu` | core、languages、shaping、text-source、identity、errors | ES2022 + DOM | 无 |
 | `/browser` | core、shaping、errors | ES2022 + DOM | 无 |
 
 这些是本库接口，不是第三方 vgpu、parser 或 shaper 的 API 声明。root 不反向
@@ -87,6 +87,11 @@ DOM 不进入前五个入口的声明闭包。parser/WASM/字体/原生 bridge/p
 - `/browser` 只借用产品输入元素/session/geometry；composition event
   的 cancelled 分支保留 `recoverableText`。primary-only 预览/一次 undo group、
   稳定目标失效取消的实际状态机留给 P6，不以事件类型冒称 IME 已支持。
+- 只读 `shapeText/layoutText` 接受 `TextReadSnapshot`，不需要 history/session；
+  泛型 glyph/cluster source ranges 和 hits 保留 `TextReadVersion`，不伪造 `RevisionId`。
+  `VgpuTextView` 借用 `TextSource`，允许 `setSource`，但不满足可编辑 `EditorGeometry`，
+  不能接到输入桥。异步布局须丢弃失效 read、已替换 source 和旧 layout generation 的结果。
+  这些仍只有类型；已实现的是根入口的只读存储适配，见 [文本源接入](./editor-text-sources.md)。
 
 ## 所有权
 
@@ -98,6 +103,7 @@ DOM 不进入前五个入口的声明闭包。parser/WASM/字体/原生 bridge/p
 | font handle | 解码字体/内部字节副本 | 不保留输入字节的可变别名 |
 | layout engine | layout/cache | shaper、fonts、当前计算用源快照 |
 | editor view | atlas/GPU/渲染订阅 | session、layout |
+| text view | atlas/GPU/订阅、当前 read lease | TextSource、layout；不销毁产品 buffer/head |
 | Diff view | atlas/GPU/局部视图状态 | report 值、layout、syntax |
 | input binding | 输入监听/组合预览状态 | element、session、geometry |
 

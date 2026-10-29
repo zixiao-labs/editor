@@ -87,6 +87,11 @@ test("batch visibility updates retain full order, exact Unicode summaries and li
   expect(hidden.guard("id:9999")).toEqual({ before: 0, visible: false });
   expect([...hidden.visibleRange(0, 0)]).toEqual([]);
   expect(hidden.debugSizes()).toEqual(original.debugSizes());
+  expect(hidden.setVisibility([{ id: "id:1", visible: true }, { id: "id:1", visible: false }])).toBe(hidden);
+  const restored = hidden.setVisibility([{ id: "id:1", visible: false }, { id: "id:1", visible: true }]);
+  expect(restored.summary.visible).toBe(1);
+  expect(restored.summary.utf16).toBe(2);
+  expect(restored.summary.utf8).toBe(4);
   expect(hidden.hide(targets)).toBe(hidden);
   expect(() => hidden.hide(["unknown"])).toThrow("INVALID_REFERENCE");
   expect(() => hidden.splice(0, 0, [value("id:1")])).toThrow("INVALID_REFERENCE");

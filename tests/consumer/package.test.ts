@@ -31,6 +31,18 @@ test("native Node ESM import never touches DOM or the network", () => {
     let routed = false;
     try { backend.createStore(); } catch (error) { routed = error.message === "product-factory-reached"; }
     if (!routed) throw new Error("backend factory was not invoked");
+    const source = api.createTextSource({
+      snapshot() {
+        return { kind: "snapshot", lengthUtf16: 4, readUtf16: (a, b) => "A😀B".slice(a, b), dispose() {} };
+      },
+      onChange() { return { dispose() {} }; },
+    });
+    const read = source.snapshot();
+    if (read.readUtf16(1, 3) !== "😀") throw new Error("bounded read failed");
+    let boundary = false;
+    try { read.pointUtf16(2); } catch (error) { boundary = error.code === "INVALID_BOUNDARY"; }
+    if (!boundary) throw new Error("scalar boundary was not checked");
+    read.dispose(); source.dispose();
     for (const entry of ["collaboration", "languages", "lsp", "shaping", "vgpu", "browser"]) {
       const contracts = await import("@zixiao-labs/editor/" + entry);
       if (Object.keys(contracts).length) throw new Error("unexpected runtime export: " + entry);

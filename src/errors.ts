@@ -13,7 +13,7 @@ export type EditorErrorCode =
   | "INVALID_PRESENCE" | "INVALID_DIFF_LABEL" | "URI_IN_USE" | "UNSUPPORTED_CAPABILITY"
   | "UNSYNCHRONIZABLE_REVISION" | "PROTOCOL_ERROR" | "CANCELLED" | "TIMEOUT" | "DISCONNECTED"
   | "FONT_UNAVAILABLE" | "SHAPING_FAILED" | "WEBGPU_UNAVAILABLE" | "DEVICE_LOST"
-  | "COMPOSITION_CONFLICT";
+  | "COMPOSITION_CONFLICT" | "STALE_TEXT_VIEW" | "WRONG_TEXT_VIEW";
 
 function copyJson(value: JsonValue): JsonValue {
   if (Array.isArray(value)) return Object.freeze(value.map(copyJson));
