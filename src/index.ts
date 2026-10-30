@@ -4,5 +4,8 @@ export type * from "./contracts/core.js";
 export type * from "./contracts/collaboration.js";
 export type * from "./contracts/history-backend.js";
 export { defineHistoryBackend, assertHistoryBackendCompatibility, historyStoreFor } from "./history-backend.js";
+export { createHistoryStore } from "./native-backend.js";
+export { decodeHistoryBundle, decodePositionToken, encodeHistoryBundle, encodePositionToken } from "./native-codec.js";
+export { formatUnifiedDiff } from "./diff.js";
 export type * from "./contracts/text-source.js";
 export { createTextSource, textSourceFromHead } from "./text-source.js";

@@ -1,7 +1,8 @@
 import {
   documentId, EditorError, defineHistoryBackend, historyBackendId, historyStoreFor,
-  createTextSource,
+  createTextSource, createHistoryStore, decodeHistoryBundle, encodeHistoryBundle, formatUnifiedDiff,
   type CancellationSignal, type CoreFactories, type SessionCommitReceipt, type DiffInput,
+  type HistoryImportEvent, type HistoryImportReport, type HistoryPendingId, type HistoryStore,
   type HistoryStoreImplementation,
 } from "@zixiao-labs/editor";
 import type { CollaborationFactories } from "@zixiao-labs/editor/collaboration";
@@ -46,12 +47,25 @@ read.read(read.rangeUtf16(0, 1));
 read.dispose(); text.dispose();
 // @ts-expect-error The headless fixture must never accidentally acquire a DOM library.
 type NoDom = HTMLCanvasElement;
-// @ts-expect-error Type-only contracts must not advertise callable runtime exports.
-import { createHistoryStore } from "@zixiao-labs/editor";
+// The default native factory and its versioned codec are real runtime exports.
+const store: HistoryStore = createHistoryStore();
+const report: HistoryImportReport = store.importHistory(
+  decodeHistoryBundle(encodeHistoryBundle(store.exportHistory({ target: store.revisions([]), known: store.revisions([]) }))),
+);
+if (report.status === "pending") {
+  const pending: HistoryPendingId = report.id;
+  void pending;
+}
+const subscription = store.onImport((event: HistoryImportEvent) => {
+  if (event.status === "accepted") void event.availableRevisions;
+  else void event.error;
+});
+subscription.dispose();
+void formatUnifiedDiff;
 // @ts-expect-error Optional integration factories are not implemented yet.
 import { connectLanguageServer } from "@zixiao-labs/editor/lsp";
 void [
   error, signal, api, diff, collaboration, languages, lsp, shaping, syntax, binding, layout,
-  createHistoryStore, connectLanguageServer,
+  connectLanguageServer,
   backend, historyStoreFor,
 ];

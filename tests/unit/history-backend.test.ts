@@ -1,8 +1,8 @@
 import { expect, test } from "@lightning-js/lightning";
 import { defineHistoryBackend, assertHistoryBackendCompatibility, historyStoreFor } from "../../src/index.js";
-import { actorId, documentId, externalBaseId, historyBackendId, replicaId } from "../../src/identity.js";
+import { actorId, documentId, externalBaseId, historyBackendId, historyPendingId, replicaId } from "../../src/identity.js";
 import type { HistoryBackendDescriptor, HistoryBackendContext } from "../../src/contracts/history-backend.js";
-import type { HistoryStore } from "../../src/contracts/core.js";
+import type { HistoryImportEvent, HistoryStore } from "../../src/contracts/core.js";
 import { backendDouble } from "./support/backend-double.js";
 
 function descriptor(id = "test:one"): HistoryBackendDescriptor {
@@ -228,4 +228,27 @@ test("an asynchronous backend Diff borrows the store until completion", async ()
   expect(() => one.store.dispose()).toThrow("RESOURCE_IN_USE");
   expect((await pending).basis).toBe("versions");
   one.store.dispose();
+});
+
+test("store-level import events normalize through the facade with reentrancy protection", async () => {
+  const fixture = backendDouble("fixture:imports");
+  const store = defineHistoryBackend(fixture.definition).createStore();
+  const events: HistoryImportEvent[] = [];
+  const subscription = store.onImport((event) => {
+    events.push(event);
+    expect(Object.isFrozen(event)).toBe(true);
+    expect(() => store.openWriter({ actor: actorId("late"), replica: replicaId("late") })).toThrow("REENTRANT_WRITE");
+  });
+  fixture.emitImport({
+    id: historyPendingId("fixture-pending:9"), status: "accepted", availableRevisions: store.revisions([]),
+  });
+  expect(events.length).toBe(0);
+  await Promise.resolve();
+  expect(events.length).toBe(1);
+  expect(events[0]!.status).toBe("accepted");
+  expect([...events[0]!.availableRevisions!.entries()]).toEqual([]);
+  subscription.dispose();
+  subscription.dispose();
+  store.dispose();
+  expect(() => store.onImport(() => {})).toThrow("DISPOSED");
 });

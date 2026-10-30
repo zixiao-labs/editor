@@ -1,8 +1,9 @@
 # 可替换的 CRDT / 历史后端
 
 状态：公开的产品后端接入层、命名空间/opaque SDK、生命周期与能力检查已经实现。
-默认 FugueMax 内核仍是内部实现，尚未满足完整 `HistoryStore`，没有注册或公开默认工厂。
-本轮是用户明确确认的后端替换能力扩展，不是“只允许配置同一个算法的产品模式”。
+默认 FugueMax 内核已满足完整 `HistoryStore` 并通过同一接入层发布为
+`createHistoryStore`（API D13，含 codec/defer/保留/Diff；`selectiveUndo` 暂为 false）。
+本文件记录的后端替换能力不是“只允许配置同一个算法的产品模式”。
 
 ## 1. 为什么替换整个历史边界
 
@@ -10,7 +11,7 @@
 不同后端可以有不同的操作图、位置表示、revision identity、undo 实现和传输编码，
 但上层仍只消费快照、坐标、精确版本、原子批次、历史查询、receipt 和明确的错误。
 
-必须实现完整的 `HistoryStoreImplementation`，包括 pin、位置传递、history 传递和 Diff。
+必须实现完整的 `HistoryStoreImplementation`，包括 pin、位置传递、history 传递、Diff 与导入事件（`onImport`）。
 固定成员、CAS/ABA、group closure、Unicode/稳定位置、provenance、失败无前缀等基础语义
 不是可选开关。不能用缺方法或一排 `not implemented` 充当已支持的后端。
 以后可复用独立的通用 Diff/保留适配器，但本轮不假造这些尚未完成的 native 功能。
@@ -160,7 +161,9 @@ defer 能力同样在调用 provider 前检查，不支持报 `UNSUPPORTED_CAPAB
 这不证明产品提供的 CRDT 收敛、持久化、跨进程协议或完整 undo 正确；
 后端作者还须执行符合 D1–D10 的独立模型/并发/资源/安全验收。
 默认 NativeHistory/NativeStore 的原有独立差分仍保留，它们没有为了“可注入”而换算法、
-丢弃墓碑或公开不完整 factory。内部 group 控制另有独立差分，但未接默认公开 undo port。
+丢弃墓碑或公开不完整 factory；默认 provider 现经同一接入层提供 codec、defer 事件、
+pin/位置导出与 Diff，集成测试覆盖真实内核而非仅 scripted double。
+内部 group 控制另有独立差分；公开 native undo port 仍未接通（capability 为 false）。
 没有实现 DeltaDB、Git 集成、session/view。仅需外部 buffer 的只读模式不用实现完整后端，
 直接使用 [TextSource](./editor-text-sources.md)，不强制引入 CRDT/rope/SumTree。
 

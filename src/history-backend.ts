@@ -1,13 +1,15 @@
 import { captureDescriptor, captureProtocol, makeContext, type BackendContextState } from "./backends/context.js";
 import type {
-  CommitReceipt, Disposable, EditingHead, HeadChangeEvent, HeadCheckpoint, HistoryImportReport, HistoryQueries,
-  HistoryStore, HistoryStoreOptions, PositionResolution, RevisionEntry, TextPoint, TextRange, TextSnapshot, Writer,
+  CommitReceipt, Disposable, EditingHead, HeadChangeEvent, HeadCheckpoint, HistoryImportEvent, HistoryImportReport,
+  HistoryQueries, HistoryStore, HistoryStoreOptions, PositionResolution, RevisionEntry, TextPoint, TextRange,
+  TextSnapshot, Writer,
 } from "./contracts/core.js";
 import type {
   HistoryBackend, HistoryBackendDefinition, HistoryBackendDescriptor, HistoryUndoScope, HistoryUndoToken,
   HistoryStoreImplementation, HistoryBackendProtocol,
 } from "./contracts/history-backend.js";
 import { EditorError } from "./errors.js";
+import { historyPendingId } from "./identity.js";
 
 const implementations = new WeakSet<object>();
 const headOwners = new WeakMap<EditingHead, Readonly<{ store: HistoryStore; active: () => void }>>();
@@ -58,7 +60,7 @@ export function defineHistoryBackend(definition: HistoryBackendDefinition): Hist
       const captured = Object.freeze({ ...options });
       const implementation = create.call(definition, context.api, captured);
       methods(implementation, ["createDocument", "openWriter", "revisions", "fork", "snapshot", "pin", "exportPosition",
-        "importPosition", "exportHistory", "importHistory", "diff", "dispose"], "HistoryStore");
+        "importPosition", "exportHistory", "importHistory", "onImport", "diff", "dispose"], "HistoryStore");
       methods(implementation.history, ["revision", "transaction", "transactions", "compare", "provenance", "resolve", "translate"], "HistoryQueries");
       if (descriptor.capabilities.selectiveUndo) methods(implementation.undo, ["open"], "HistoryUndoProvider");
       else if (implementation.undo !== undefined) {
@@ -322,10 +324,37 @@ function connect(raw: HistoryStoreImplementation,
         const result = raw.importHistory(bundle, { missing });
         if (result.status === "pending") {
           if (missing !== "defer") throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: backend deferred a rejecting import");
-          result.missing.forEach((id) => ids.local("transaction", id)); return result;
+          result.missing.forEach((id) => ids.local("transaction", id));
+          return Object.freeze({
+            status: "pending", missing: Object.freeze([...result.missing]), id: historyPendingId(result.id),
+          });
         }
         return Object.freeze({ status: result.status, availableRevisions: context.set(result.availableRevisions) });
       });
+    },
+    onImport(listener: (event: HistoryImportEvent) => void): Disposable {
+      active();
+      if (typeof listener !== "function") throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: listener must be a function");
+      let subscribed = true;
+      const subscription = raw.onImport((event) => {
+        if (event.status !== "accepted" && event.status !== "rejected") {
+          throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: invalid import event status");
+        }
+        const captured: HistoryImportEvent = Object.freeze({
+          id: historyPendingId(event.id),
+          status: event.status,
+          ...(event.availableRevisions === undefined ? {} : { availableRevisions: context.set(event.availableRevisions) }),
+          ...(event.missing === undefined ? {} : {
+            missing: Object.freeze(event.missing.map((id) => { ids.local("transaction", id); return id; })),
+          }),
+          ...(event.error === undefined ? {} : {
+            error: event.error instanceof EditorError ? event.error
+              : new EditorError("INVALID_REFERENCE", "Backend import listener failed", { cause: event.error }),
+          }),
+        });
+        enqueue(() => { if (subscribed && !disposed) listener(captured); });
+      });
+      return Object.freeze({ dispose() { if (!subscribed) return; subscribed = false; subscription.dispose(); } });
     },
     async diff(input) {
       active();

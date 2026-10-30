@@ -1,8 +1,8 @@
 // Type contracts only. Factories are not runtime exports until their stages ship.
 import type {
   ActorId, CommitId, DocumentId, ExcerptId, ExternalBaseId, HeadId, HeadStamp, HistoryCursor,
-  OperationId, Opaque, ProjectionVersion, ReplicaId, RevisionId, SelectionId, SelectionVersion,
-  TransactionGroupId, TransactionId, UndoGroupId,
+  HistoryPendingId, OperationId, Opaque, ProjectionVersion, ReplicaId, RevisionId, SelectionId,
+  SelectionVersion, TransactionGroupId, TransactionId, UndoGroupId,
 } from "../identity.js";
 import type { EditorError, JsonValue } from "../errors.js";
 import type { HistoryBackendDescriptor, HistoryUndoProvider } from "./history-backend.js";
@@ -162,7 +162,15 @@ export interface HistoryQueries {
 export type HistoryBundle = Opaque<object, "HistoryBundle">;
 export type HistoryImportReport =
   | Readonly<{ status: "accepted" | "duplicate"; availableRevisions: RevisionSet }>
-  | Readonly<{ status: "pending"; missing: readonly TransactionId[] }>;
+  | Readonly<{ status: "pending"; missing: readonly TransactionId[]; id: HistoryPendingId }>;
+/** Resolution of an explicitly deferred import; delivery is asynchronous and reentrancy-safe. */
+export interface HistoryImportEvent {
+  readonly id: HistoryPendingId;
+  readonly status: "accepted" | "rejected";
+  readonly availableRevisions?: RevisionSet;
+  readonly missing?: readonly TransactionId[];
+  readonly error?: EditorError;
+}
 export interface HistoryStore extends Disposable {
   readonly backend: HistoryBackendDescriptor;
   readonly undo?: HistoryUndoProvider;
@@ -176,6 +184,7 @@ export interface HistoryStore extends Disposable {
   importPosition(token: PositionToken): ExportedPosition;
   exportHistory(input: { target: RevisionSet; known: RevisionSet }): HistoryBundle;
   importHistory(bundle: HistoryBundle, options?: { missing?: "reject" | "defer" }): HistoryImportReport;
+  onImport(listener: (event: HistoryImportEvent) => void): Disposable;
   readonly history: HistoryQueries;
   diff(input: DiffInput & DiffOptions): Promise<DiffReport>;
 }

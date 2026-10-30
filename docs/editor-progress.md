@@ -19,7 +19,9 @@
 跨文档原子控制和 meaningful no-effect 历史；不是 session undo 栈。
 **外部只读文本源已公开**：产品 gap buffer/持久快照无需 history/rope/SumTree；
 兼容 history head 可接到同一有界读端口。只读 shaping/view 仍只有类型。
-默认完整历史 provider、wire codec、公开 native undo adapter 仍待完成，P3–P8 未实现；
+**默认完整历史 backend 与版本化 wire codec 已发布**（`createHistoryStore`，API D13）：
+codec、显式 defer/pending 事件、pin/位置导出与完整 Diff 均可按包名调用；
+公开 native undo adapter 与 session 栈仍待完成，P3–P8 未实现；
 内部生产差分通过不能当成完整生产历史验收，或把类型当可调用工厂。
 
 上一轮基线：用户恢复四份原设计文档后的 `b688a6e84f3a98d4ea51aaaa57288aa9462436ba`。
@@ -44,7 +46,7 @@ Workflow 仍为 `maintainer-original`，仅 editor；原设计线程是用户指
 | G0 | 完成规格与独立验证设计 | `editor-crdt-design.md`、规格模型、枚举 oracle、负对照；不是形式化证明 |
 | G1 核心/协作 | 契约与工具门禁通过 | branded IDs、head/session checkpoints、receipt/Diff、协作类型；root 另有公开后端接入运行时 |
 | G1 集成类型 | 本轮契约/入口门禁通过 | 语言/LSP/shaping/vgpu/browser、六个 type-only 子入口、无 DOM/DOM consumer、12 个规范代码块与负对照；运行时依赖审查仍留给安装阶段 |
-| P2 | 进行中，存储/group/活性和公开接入层已接入 | 产品后端与只读存储可替换；默认内核仍内部，公开 undo adapter、安全 codec、pin/位置导出与完整工厂待完成 |
+| P2 | 默认 backend/factory、codec、defer、保留与 Diff 已公开 | `createHistoryStore`、字节 codec、pending 事件、pin/位置导出、Diff 按包名可运行；公开 native undo adapter 待完成 |
 | P3/P4 | 未开始 | session/undo/MultiBuffer、同步/presence、结构化与 unified Agent Diff |
 | P5–P8 | 未开始 | 增量语法/真实 LSP、字体与 vgpu、输入/读屏、Diff view/playground、完整交付 |
 
@@ -556,11 +558,74 @@ wire codec/defer、pin/位置导出和完整 Diff 尚未实现。
 设计与限制见 [group 活性](./editor-transaction-groups.md#7-默认-native-group-活性寄存器)、
 [文本源](./editor-text-sources.md)。未 commit、push、发布、PR 或合入。
 
+## 本轮变更：默认 native backend、codec、defer、保留与 Diff
+
+- 公开 `createHistoryStore(options?)`（API D13）：默认 FugueMax 内核经既有
+  `defineHistoryBackend` 接入层发布为完整 `HistoryStore`，全部分布式 ID 经 SDK
+  命名空间发行，`store.backend` 报告 family `zixiao:editor-native`、
+  algorithm `fugue-max/sequence-v1`、独立 history/position 格式 ID；
+  `capabilities` 为 `{ selectiveUndo: false, deferredImport: true }`。
+  产品替换整套引擎仍走 D11，不需要 patch 本库。
+- 新增版本化字节 codec：`encodeHistoryBundle`/`decodeHistoryBundle`、
+  `encodePositionToken`/`decodePositionToken`。信封为 magic + codec 版本 +
+  精确 payload 长度 + 规范 UTF-8 JSON；自带严格 UTF-8 解码器（拒绝 overlong、
+  代理编码与截断），解码在建立 opaque 值前验证未知字段、身份 pattern、
+  canonical frontier、自引用依赖、manifest digest 与 8 MiB/100,000 限额；
+  从不写入任何 store。位置 token payload 为 `{v,document,root,guard,affinity}`，
+  元素/根身份形状严格校验，版本 1 之外报 `UNSUPPORTED_FORMAT`。
+- 新增 pin 与位置导出/导入：`pin` 验证精确版本集（含 group 闭包）；
+  `exportPosition` 读取本地 opaque 位置、登记依赖并发行格式 token；
+  `importPosition` 校验 document/root 与 payload 后以本地 issuer 重建位置。
+  持有 pin/导出位置阻止 store 释放，释放幂等。
+- 新增 defer/pending：显式 defer 的缺依赖批次进入 32 MiB 有界暂存，
+  按 canonical payload 去重（重复导入返回同一 `HistoryPendingId`）；
+  同 ID 异 payload 以“较新声明获胜”驱逐旧 pending 并发拒绝事件。
+  后续导入按 FIFO 重试，整体接受或拒绝，经 `store.onImport` 在 microtask
+  投递事件；同步重入写入拒绝，监听异常进入 error sink。
+- 新增完整 Diff：`store.diff` 支持 receipt 与 versions 两种基准，输出不可变
+  `DiffReport`（schemaVersion 1）：结构化 replacements 为 scalar 级最大差异段，
+  grapheme intraline marks 仅作展示细分；hunks 按 LF patch 行组织、CR 保留、
+  缺尾换行标记、context 0–1000；budget 按文档记录的确定性度量检查，不截断；
+  `CancellationSignal` 报 `CANCELLED`。`formatUnifiedDiff` 输出确定性 unified
+  patch：默认标签为安全编码的文档身份、缺席侧 `/dev/null`、标签控制字符报
+  `INVALID_DIFF_LABEL`、formatter 输出同样受预算约束。grapheme 分段使用平台
+  `Intl.Segmenter`（ICU，记录为平台设施），只影响展示 marks。
+- 公开接口新增 `HistoryStore.onImport`、`HistoryImportEvent`、`HistoryPendingId`；
+  pending 报告携带 `id`。`tests/consumer/api-document.test.ts` 扩展为也能双向核对
+  “文档自身声明的运行时函数”（如 codec 函数）。
+- 新增 **22 项测试**：4 项 codec（含损坏字节语料与非规范 JSON）、11 项 native
+  backend 集成（含约 7 MiB×4 的 pending 上限、跨 store 位置/历史 roundtrip、
+  驱逐事件、订阅生命周期）、6 项 Diff（含随机编辑下 hunk/unified 双独立重建
+  oracle、预算与取消）、1 项 facade 导入事件归一化。
+
+### 本轮实际验证
+
+Node 24.15.0、pnpm 12.15.0，HEAD `e25fa64` 加本轮未提交实现与文档。
+无新增依赖/工具升级；manifest、lock、七入口 export map 未改（root runtime 导出
+按 D13 用户授权扩展）。
+
+| 命令 | 实际结果 |
+| --- | --- |
+| `pnpm install --frozen-lockfile`（沿用锁定安装） | 通过 |
+| `pnpm test` | 26 文件、151 项通过，较基线 129 项新增 22 项 |
+| `pnpm typecheck` | ES-only/DOM/isolated declarations 三配置通过 |
+| `pnpm test:types` | ES-only 三 fixture、DOM 一 fixture 通过，含 codec/事件/品牌负例 |
+| `SEED=424242 pnpm test:crdt` | 30 项通过 |
+| `pnpm build`、`pnpm test:consumer` | 七入口构建、两类 consumer 编译与 5 项门禁通过；Node 子进程冒烟含真实建 store/提交/Diff/codec roundtrip |
+| `pnpm measure:package` | root 214,235 bytes / gzip 51,720（预算 128 KiB）；六子入口 runtime 仍为空 |
+| `git diff --check` | 通过（提交前复核） |
+
+默认 factory 的行为证据来自真实内核经同一接入层的端到端测试，不是第二个 CRDT；
+这不证明第三方后端算法、持久存储、跨进程网络或 durable ACK。公开 undo adapter、
+session 栈、Diff 视图、真实 browser/LSP/IME 与性能基准仍未实现或未运行。
+没有 commit、push、发布、PR 或合入共享分支。
+
 ## 下一项
 
-继续默认安全 codec/defer、pin/position 保留及完整 Diff，接公开 native undo port，
-最后发布满足全部契约的默认 backend/factory；不靠 not-implemented 方法提前开放。
-会话分组/undo/redo 栈与选区恢复仍是后续独立实现。
+接公开 native undo adapter（capability `selectiveUndo` 翻 true：capture/apply 复用
+活性内核、多组原子发布），随后进入 P3 会话分组/选区/MultiBuffer 与 P4 同步端口、
+Diff 视图。默认工厂已发布，后续修改不得破坏已锁定 descriptor 兼容性，
+不靠 not-implemented 方法提前开放。
 产品仅渲染快速模式已经可以独立适配存储，真实 shaping/GPU view 在集成阶段另行实现，
 不将本轮有界读端口或类型检查当作绘制成功。
 核心与集成分别保持无 DOM/DOM 的声明边界；P2 的生产实现必须与规格模型和独立

@@ -1,10 +1,12 @@
 import { expectTypeOf } from "@lightning-js/lightning";
 import {
   documentId, externalBaseId, actorId, replicaId, selectionId, excerptId,
+  createHistoryStore, encodeHistoryBundle, decodeHistoryBundle, encodePositionToken, decodePositionToken,
   type DocumentId, type ActorId, type RevisionId, type HeadStamp, type SelectionVersion,
   type TextPoint, type ProjectionPoint, type HeadCheckpoint, type SessionCheckpoint,
   type CoreFactories, type CollaborationFactories, type HistoryStore, type CommitReceipt,
   type SessionCommitReceipt, type DiffInput, type SelectionSnapshot, type CancellationSignal,
+  type HistoryImportEvent, type HistoryImportReport, type HistoryPendingId, type PositionToken,
   createTextSource, textSourceFromHead, type TextReadVersion,
 } from "../../src/index.js";
 
@@ -108,3 +110,15 @@ selections.items.push(selections.items[0]!);
 const forged: CommitReceipt = { before: change.before, after: change.after, status: "committed" };
 void raw;
 void forged;
+
+// The default native factory, codec and deferred-import events are runtime exports.
+expectTypeOf(createHistoryStore()).toEqualTypeOf<HistoryStore>();
+const codecBytes: Uint8Array = encodeHistoryBundle(decodeHistoryBundle(new Uint8Array()));
+const codecToken: PositionToken = decodePositionToken(encodePositionToken(decodePositionToken(codecBytes)));
+declare const imported: HistoryImportReport;
+if (imported.status === "pending") expectTypeOf(imported.id).toEqualTypeOf<HistoryPendingId>();
+store.onImport((event) => {
+  expectTypeOf(event).toExtend<HistoryImportEvent>();
+  if (event.status === "accepted") expectTypeOf(event.availableRevisions).toEqualTypeOf<ReturnType<HistoryStore["revisions"]> | undefined>();
+});
+void codecToken;

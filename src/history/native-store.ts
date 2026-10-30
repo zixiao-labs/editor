@@ -7,7 +7,7 @@ import { TextIndex } from "../coordinates/text-index.js";
 import { EditorError } from "../errors.js";
 import {
   documentId, operationId, revisionId, type ActorId, type CommitId, type DocumentId,
-  type HeadId, type HeadStamp, type HistoryCursor, type ReplicaId, type RevisionId,
+  type ExternalBaseId, type HeadId, type HeadStamp, type HistoryCursor, type ReplicaId, type RevisionId,
   type TransactionGroupId, type TransactionId,
 } from "../identity.js";
 import { canonicalCopy, canonicalJson } from "./canonical.js";
@@ -505,6 +505,27 @@ export class NativeStore {
   }
 
   ownsReceipt(receipt: CommitReceipt): boolean { this.#active(); return this.#receipts.has(receipt); }
+
+  hasTransaction(document: DocumentId, id: TransactionId): boolean {
+    this.#active();
+    return this.#transactionDocuments.get(id) === document;
+  }
+
+  rootOf(document: DocumentId): Readonly<{ root: string; base: ExternalBaseId }> {
+    const history = this.#document(document);
+    return Object.freeze({ root: history.root.id, base: history.root.base });
+  }
+
+  /** Exact causal difference to-minus-from for one document, in causal order. */
+  difference(input: { document: DocumentId; from: RevisionId | null; to: RevisionId }): readonly TransactionInfo[] {
+    this.#active();
+    const history = this.#document(input.document);
+    const to = history.transactions(input.to);
+    const from = input.from === null
+      ? new Set<TransactionId>()
+      : new Set(history.transactions(input.from).map((tx) => tx.id));
+    return Object.freeze(to.filter((tx) => !from.has(tx.id)).map((tx) => this.#transactionInfo(tx.id)));
+  }
 
   #enqueue(state: HeadState, event: HeadChangeEvent): void {
     this.#events.push({ event, listeners: [...state.listeners] });

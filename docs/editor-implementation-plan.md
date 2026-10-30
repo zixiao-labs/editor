@@ -1,6 +1,6 @@
 # Editor 分阶段实施计划
 
-状态：G0/G1 门禁已通过。P2 已有内部源视图、FugueMax 持久索引、store/head、原子 group 与活性控制；按用户后续确认，公开完整产品后端接入及外部只读文本源。默认完整 native provider、session undo 和 wire codec 仍待完成。当前实测、剩余事项见 [实施记录](./editor-progress.md)，接入边界见 API D11/D12；不把下面的验收项当作已有测试结果。
+状态：G0/G1 门禁已通过。P2 已发布默认 native backend/factory、版本化 wire codec、显式 defer 事件、pin/位置导出与完整 Diff（API D13），并保留产品后端接入（D11）与外部只读文本源（D12）。公开 native undo adapter、session undo 栈与 P3–P8 仍待完成。当前实测、剩余事项见 [实施记录](./editor-progress.md)；不把下面的验收项当作已有测试结果。
 
 ## 1. 工作流、基线与阶段边界
 
@@ -116,9 +116,10 @@ cursor、chunked rope 已接入实际写入与坐标/快照，并检查结构共
 共享代表 tie key、独立删除标签、跨源控制原子性和 no-effect 真实历史；session 栈尚未实现。
 外部文本源已支持产品 gap buffer/persistent snapshot，只读布局不要求使用完整历史；
 任意兼容 head 也能有界读取到同一接缝。只读 shaping/view 尚只有类型，不冒充 GPU runtime。
-下一项继续 codec/defer/retention，再结合 Diff 补齐默认 provider 和公开 undo adapter。
-默认公共工厂还受 P4 `HistoryStore.diff` 的完整契约约束，不导出缺方法工厂
-绕过公共验收目标；下列整体交付与退出条件仍未满足。
+codec/defer/retention、Diff 与默认 provider/factory 已按此顺序完成并公开（D13）；
+下一项接公开 native undo adapter，再进入 P3/P4。下列整体交付与退出条件中，
+pin/导出位置保留、版本化 codec 与缺依赖 reject/defer 已满足；跨进程持久化、
+durable ACK 与真实 browser/IME 验收仍未满足。
 
 交付：
 

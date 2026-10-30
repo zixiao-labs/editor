@@ -117,6 +117,7 @@ interface HistoryStore extends Disposable {
   importHistory(bundle: HistoryBundle, options?: {
     missing?: "reject" | "defer";
   }): HistoryImportReport;
+  onImport(listener: (event: HistoryImportEvent) => void): Disposable;
   readonly history: HistoryQueries;
   diff(input: DiffInput & DiffOptions): Promise<DiffReport>;
 }
@@ -509,3 +510,29 @@ mutation（含 ABA）的 `isCurrent()`。后者在每次读取前后检查；失
 快速/完整模式由产品显式替换 source、保留或迁移数据；不自动转换旧坐标或恢复 gap buffer
 没有记录的历史。具体用法见 [只读文本源](./editor-text-sources.md)。
 当前只读适配运行时已实现，shaping/GPU view 仍只有类型契约，不能据此声称已经绘制文字。
+
+## D13. 默认 native backend、线格式与导入事件
+
+用户要求继续 P2 收尾，并确保产品无需 patch 本库即可定制。默认 FugueMax 内核现已满足
+完整 `HistoryStore` 契约并通过既有接入层发布：根入口导出可调用的
+`createHistoryStore(options?)`；`store.backend` 报告稳定协议身份
+（family `zixiao:editor-native`、algorithm `fugue-max/sequence-v1`、独立的
+history/position 格式 ID）。替换整套历史引擎仍走 D11 的 `defineHistoryBackend`，
+默认 backend 不是可改写的全局注册表。`capabilities.selectiveUndo` 本轮为 false：
+公开 undo adapter 与 session 栈仍是后续工作，不伪装已实现。
+
+```ts
+declare function encodeHistoryBundle(bundle: HistoryBundle): Uint8Array;
+declare function decodeHistoryBundle(bytes: Uint8Array): HistoryBundle;
+declare function encodePositionToken(token: PositionToken): Uint8Array;
+declare function decodePositionToken(bytes: Uint8Array): PositionToken;
+```
+
+codec 是版本化字节格式：magic、codec 版本、精确 payload 长度与规范 UTF-8 JSON。
+解码在建立 opaque 值前验证结构、身份形状与 D10 限额，拒绝非规范 JSON、未知字段、
+坏 UTF-8、长度不符和篡改 manifest，并且从不写入任何 store；跨进程持久化与传输
+归产品。显式 defer 的 pending 有 32 MiB 有界暂存，后到的导入按序重试并整体
+接受或拒绝；`HistoryStore.onImport(listener)` 订阅并发事件，事件带
+`HistoryPendingId`、判别状态与 available revisions 或错误，
+`HistoryImportReport` 的 pending 分支同时返回该 ID。事件在 microtask 投递，
+监听期间同步写入报 `REENTRANT_WRITE`。本扩展不改变 D1–D12 的行为要求。

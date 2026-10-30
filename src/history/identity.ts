@@ -28,6 +28,20 @@ export function checkTransactionId(id: TransactionId): void {
   }
 }
 
+export function checkRootId(id: string): void {
+  if (typeof id !== "string" || !/^root:[0-9a-f]{64}$/.test(id)) {
+    throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: noncanonical root identity");
+  }
+}
+
+const ELEMENT_ID = /^(?:t:[0-9a-f]{32}:[0-9a-f]{16}|root:[0-9a-f]{64})\/[0-9a-f]{8}$/u;
+
+export function checkElementId(id: string): void {
+  if (typeof id !== "string" || !ELEMENT_ID.test(id)) {
+    throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: noncanonical element identity");
+  }
+}
+
 export interface NativeAllocation { readonly ids: readonly TransactionId[] }
 
 /** One non-resumable stream. Counter ordering is never a dependency relation. */

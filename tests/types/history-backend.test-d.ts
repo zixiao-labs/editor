@@ -49,7 +49,7 @@ const forged: StablePosition = {};
 defineHistoryBackend({
   descriptor: backend.descriptor,
   createStore(): HistoryStoreImplementation {
-    // @ts-expect-error NativeStore is still incomplete: codec/pin/Diff are not implemented.
+    // @ts-expect-error The internal kernel is not the complete public implementation.
     return new NativeStore();
   },
 });

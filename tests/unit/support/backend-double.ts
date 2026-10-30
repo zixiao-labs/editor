@@ -1,11 +1,12 @@
 import type {
-  CommitReceipt, EditingHead, HeadChangeEvent, HeadCheckpoint, RevisionEntry, RevisionSet, TextSnapshot,
+  CommitReceipt, EditingHead, HeadChangeEvent, HeadCheckpoint, HistoryImportEvent, RevisionEntry, RevisionSet,
+  TextSnapshot,
 } from "../../../src/contracts/core.js";
 import type {
   HistoryBackendContext, HistoryBackendDefinition, HistoryBackendDescriptor, HistoryStoreImplementation,
 } from "../../../src/contracts/history-backend.js";
 import { EditorError } from "../../../src/errors.js";
-import { externalBaseId, historyBackendId, type DocumentId } from "../../../src/identity.js";
+import { externalBaseId, historyBackendId, historyPendingId, type DocumentId } from "../../../src/identity.js";
 
 /**
  * Scripted port double, NOT an alternative CRDT or a backend-conformance claim.
@@ -15,10 +16,12 @@ import { externalBaseId, historyBackendId, type DocumentId } from "../../../src/
 export function backendDouble(name = "fixture:one", undo = false, deferred = false): {
   definition: HistoryBackendDefinition; calls: Map<string, number>;
   contexts: HistoryBackendContext[]; rawHeads: EditingHead[];
+  emitImport(event: HistoryImportEvent): void;
 } {
   const calls = new Map<string, number>();
   const contexts: HistoryBackendContext[] = [];
   const rawHeads: EditingHead[] = [];
+  const importListeners = new Set<(event: HistoryImportEvent) => void>();
   const tap = (name: string) => calls.set(name, (calls.get(name) ?? 0) + 1);
   const descriptor: HistoryBackendDescriptor = {
     id: historyBackendId(name), contractVersion: 1, algorithm: "scripted-dispatch/v1",
@@ -117,8 +120,12 @@ export function backendDouble(name = "fixture:one", undo = false, deferred = fal
         importHistory(bundle, options) {
           tap("importHistory"); const value = bundles.read(bundle);
           return options?.missing === "defer"
-            ? { status: "pending", missing: [ids.create("transaction", "missing")] }
+            ? { status: "pending", missing: [ids.create("transaction", "missing")], id: historyPendingId(`fixture-pending:${++serial}`) }
             : { status: "duplicate", availableRevisions: set(value.entries) };
+        },
+        onImport(listener) {
+          tap("onImport"); importListeners.add(listener);
+          return { dispose: () => { tap("import.dispose"); importListeners.delete(listener); } };
         },
         history: {
           revision(input) { tap("revision"); return { ...input, base: externalBaseId("fixture"), frontier: [], parents: [] }; },
@@ -157,5 +164,8 @@ export function backendDouble(name = "fixture:one", undo = false, deferred = fal
       return store;
     },
   };
-  return { definition, calls, contexts, rawHeads };
+  return {
+    definition, calls, contexts, rawHeads,
+    emitImport(event) { for (const listener of [...importListeners]) listener(event); },
+  };
 }

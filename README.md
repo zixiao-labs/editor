@@ -3,34 +3,36 @@
 独立实现的可嵌入 TypeScript 编辑器项目，采用
 `HistoryStore → EditingHead → EditorSession` 分层。
 
-**当前不是可用的编辑器。** 已有 API 契约、CRDT 算法规格、独立规格检查器、
-核心/协作/集成类型契约，以及身份构造器和错误类型。P2 已有内部源快照、
-三种单位的坐标索引、稳定位置，以及接通源视图的单文档 FugueMax 事务内核。
-文本已采用持久化 B+ SumTree + chunked rope，接入真实替换和快照坐标查询。
-CRDT 全序/可见性已接入持久 chunk 索引、身份定位与 revision delta 物化，
-连续插入/删除按批更新，源快照直接共享索引而不编译整篇 guard 表。
-内部 store/head 编排已支持登记/查询、writer 所有权、隔离 heads、CAS/ABA 和精确
-merge/checkout，以及多文档原子 group、manifest、闭包检查和 typed bundle 传递。
-默认内核另已支持 revision-local group 活性控制与跨源原子 undo/redo effects。
-公开接入层支持产品完整历史实现，也支持独立于 history 的外部只读文本源；
-默认完整历史 store、wire codec、会话 undo 栈、
-MultiBuffer、同步端口、Diff、语言服务、
-字体塑形、GPU 视图和 playground 尚未实现。
+**当前不是可用的编辑器。** 默认 native FugueMax 历史后端已作为可调用的
+`createHistoryStore` 发布：编辑、历史查询、隔离 heads/CAS、原子 group、活性控制、
+pin/位置导出、版本化字节 codec、显式 defer 导入（含事件）与完整 Diff
+（结构化报告与 `formatUnifiedDiff`）均可按包名使用；产品替换整套历史引擎仍走
+`defineHistoryBackend`，无需 patch。CRDT 算法、独立规格检查器与全部差分门禁
+保持不变。会话 undo 栈、选区、MultiBuffer、同步端口、Diff 视图、语言服务、
+字体塑形、GPU 视图和 playground 尚未实现，公开 native undo adapter 待补。
 不会用抛 `not implemented` 的假工厂冒充运行时。
 
 ## 当前可运行的导出
 
 ```ts
-import { documentId, actorId, EditorError } from "@zixiao-labs/editor";
+import { createHistoryStore, documentId, externalBaseId, actorId, replicaId } from "@zixiao-labs/editor";
 
 const document = documentId("host-document:1");
-const actor = actorId("host-agent:1");
+const store = createHistoryStore();
+const initial = store.createDocument({ id: document, base: { id: externalBaseId("host-base:1"), text: "hello" } });
+const writer = store.openWriter({ actor: actorId("host-agent:1"), replica: replicaId("client:1") });
+const head = store.fork({ at: store.revisions([initial]), writer });
 ```
 
-身份构造器不认证身份，也不证明对应历史存在。不归一化 Unicode；非空、
+历史可按精确版本导出为字节（`encodeHistoryBundle`/`decodeHistoryBundle`），
+位置经 `exportPosition` + `encodePositionToken` 跨 store `importPosition`；
+`store.diff({ change })` 返回结构化报告，`formatUnifiedDiff(report)` 输出
+确定性 unified patch。
+
+`CoreFactories` / `CollaborationFactories` 等仍是 TypeScript 契约；其中
+`createHistoryStore` 与 `formatUnifiedDiff` 已是可调用的包导出，其余工厂按契约
+逐阶段加入。身份构造器不认证身份，也不证明对应历史存在。不归一化 Unicode；非空、
 不含控制字符、无孤立 surrogate，最多 1024 UTF-8 字节。
-`CoreFactories` / `CollaborationFactories` 等导出目前只是 TypeScript 契约，
-不是 `createHistoryStore` 等可调用的包导出。后续实现将按这些契约逐阶段加入。
 
 根入口另提供可调用的 `defineHistoryBackend`、`historyBackendId`、
 `assertHistoryBackendCompatibility` 和 `historyStoreFor`。
@@ -78,7 +80,7 @@ CRDT 检查器在 `tests/crdt`，不在生产包中。包括三副本离线/重�
 逐步对照真实 head 的精确因果集合、文本与 provenance；`transaction-groups.test.ts`
 枚举多源 cuts 并对照独立 all-or-none oracle，另做三文档/三 head 状态机。
 `group-activity.test.ts` 对照真实活性内核，含跨源共享 tie key 的负对照。
-测试通过不代表完整 P2 已验收，也不代表形式证明。
+测试通过不代表 P2 之外（undo adapter、会话、同步端口、视图）已验收，也不代表形式证明。
 
 P2 内部实现位于 `src/history`、`src/model`、`src/coordinates`、`src/text` 和 `src/collections`。
 单文档历史层建立规范 root/revision 身份、writer stream、因果闭包和包含墓碑的
@@ -89,9 +91,9 @@ fork/merge/checkout/typed 传递须 group-closed，缺成员报告精确补齐�
 不自动扩 head membership/文档域。[group 边界与验证](docs/editor-transaction-groups.md)。
 事件在 microtask 按提交序
 通知，禁止监听器同步重入写入；store/head/writer/snapshot 的借用与释放分别校验。
-默认内核模块尚未接入包入口，不能通过包名调用。root 现在包含通用后端接入层
-和外部文本读适配器，不是完整 native CRDT 的包体结果。默认工厂仍须等 codec/retention 和 `diff` 等
-完整契约齐全后才导出；接入层拒绝把缺方法的内部 store 伪装成产品后端。
+默认内核经接入层进入包入口，root 包含通用后端接入层、默认 native backend、
+codec/Diff 与外部文本读适配器；`store.backend` 描述 family/algorithm/格式/能力，
+产品后端可整套替换（D11）。接入层仍拒绝把缺方法的内部 store 伪装成产品后端。
 
 rope 的底层是等深、多路、带组合摘要和 dimension cursor 的 B+ SumTree；
 单点修改共享未变子树，不用整篇 string/prefix array 做文本写入和坐标查询。

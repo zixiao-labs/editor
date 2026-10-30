@@ -414,8 +414,8 @@ typed acceptance 一起暂存所有源、group/transaction registry 和 caches�
 整组超预算/后源损坏回滚及 counter 不消耗。详见
 [group 设计、typed 边界与证据](./editor-transaction-groups.md)。
 该 group 轮结束时未实现 public wire codec/defer、生产活性寄存器/undo、
-pin/位置导出、Diff 或公开工厂；
-没有 durable ACK、真实多进程网络或整体大历史性能验收。
+pin/位置导出、Diff 或公开工厂；其中 codec/defer、pin/位置导出、Diff 与公开工厂
+已在后续轮完成（见 §14）；仍没有 durable ACK、真实多进程网络或整体大历史性能验收。
 
 ## 13. 默认活性寄存器实现进展
 
@@ -431,5 +431,32 @@ typed 接受拒绝不一致控制和缩成 singleton 的半控制组。no-effect
 [group 活性设计](./editor-transaction-groups.md#7-默认-native-group-活性寄存器)。
 
 该机制不强迫完整产品后端照搬；外部只读文本源更不需要 CRDT/rope/history，
-见 API D12。仍待完成公开 native undo adapter、codec/defer、retention、Diff 和完整工厂；
-实际 browser/GPU/session 行为与性能不由内核差分测试代替。
+见 API D12。codec/defer、retention、Diff 与默认工厂已在后续轮完成（§14）；
+仍待完成公开 native undo adapter；实际 browser/GPU/session 行为与性能
+不由内核差分测试代替。
+
+## 14. 默认 backend 的公开 wire codec、deferred 导入与 Diff（实现记录）
+
+以下记录默认 provider 的公开编码与导入行为，格式 ID 见 `store.backend`；
+内部 typed 结构与第 9–13 节同源，但对外只暴露 opaque bundle/token。
+
+- 字节信封：4 字节 magic（bundle `ZHB1`、position `ZHP1`）+ 1 字节 codec 版本 +
+  uint32 BE payload 长度 + 规范 UTF-8 JSON payload。解码先校验长度与 magic，
+  payload 上限 bundle 8 MiB、position token 64 KiB；payload 必须为规范 JSON
+  （解码后重编码逐字节相等），未知字段、坏 UTF-8、长度不符与 trailing bytes 均拒绝。
+- bundle 结构校验：manifest 重算 digest（篡改报 `IDENTITY_CONFLICT`）、
+  事务身份/根/依赖 frontier 规范序、元素与标量 pattern、自依赖拒绝、
+  effects/控制记录形状与 100,000 operations 预算；语义闭包仍由内核接受路径验证。
+  codec 从不写入 store，也不把解码结果当作认证。
+- position token payload 为 `{v:1, document, root, guard, affinity}`，
+  guard 为 START/END 哨兵或完整元素身份；version 非 1 报 `UNSUPPORTED_FORMAT`。
+  接收方 `importPosition` 校验已登记 document 与 exact root 后以本地 issuer 重建。
+- deferred 导入：显式 defer 的缺依赖批次有 32 MiB 有界暂存，按 canonical payload
+  去重；同一事务身份出现不同 payload 时以较新声明驱逐旧 pending 并发生拒绝事件。
+  后续导入按 FIFO 重试，整体接受或拒绝，经 `onImport` 微任务投递；
+  事件与监听规则与 head 事件一致（重入拒绝、error sink）。
+- Diff：receipt/versions 两基准；结构化 replacements 为 scalar 级最大差异段，
+  grapheme intraline marks 仅为展示细分（平台 `Intl.Segmenter`，ICU 版本随宿主，
+  不影响结构化范围）；hunk 按 LF patch 行、CR 保留、缺尾换行标记；
+  预算按确定性度量在报告与 unified 输出两侧检查，超限整次 `LIMIT_EXCEEDED` 不截断；
+  取消报 `CANCELLED`。测试用独立 unified/hunk 重建 oracle 在精确 base 上重建 target。

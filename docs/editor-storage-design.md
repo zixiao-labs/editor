@@ -175,6 +175,7 @@ seek 随树高而非全文长度工作；叶内扫描上限固定。生成插入
   JS GC 回收结构共享对象，但没有历史 pin/retention/压缩策略验收。
 
 多文档原子 group 已在后续轮接通，见 [group 设计与边界](./editor-transaction-groups.md)；
+codec/defer、pin/位置导出、Diff 与默认公共工厂也已发布（见 [实施记录](./editor-progress.md)）；
 另追踪因果图管理、ID/run 压缩与完整大历史的时间/空间基准。
-未完成 codec/defer、生产 undo、pin/位置导出、Diff 或公共工厂；
-没有 browser/LSP/IME/读屏、跨线程 transfer 验收，不能从内部树计数推导这些能力。
+生产 undo adapter、browser/LSP/IME/读屏、跨线程 transfer 验收仍未完成，
+不能从内部树计数推导这些能力。

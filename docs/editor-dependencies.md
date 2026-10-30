@@ -71,20 +71,22 @@ Node `crypto` 只在独立测试数据生成命令中使用，不进入源码或
 
 | 入口 | JS bytes / gzip | 声明闭包 bytes / gzip |
 | --- | --- | --- |
-| root | 36,500 / 8,627 | 35,325 / 9,686 |
-| `/collaboration` | 0 / 20 | 27,119 / 7,056 |
-| `/languages` | 0 / 20 | 25,989 / 6,727 |
-| `/lsp` | 0 / 20 | 29,117 / 7,406 |
-| `/shaping` | 0 / 20 | 30,832 / 8,163 |
-| `/vgpu` | 0 / 20 | 34,700 / 9,449 |
-| `/browser` | 0 / 20 | 30,872 / 8,226 |
+| root | 214,235 / 51,720 | 37,173 / 10,230 |
+| `/collaboration` | 0 / 20 | 27,750 / 7,200 |
+| `/languages` | 0 / 20 | 26,619 / 6,880 |
+| `/lsp` | 0 / 20 | 29,747 / 7,556 |
+| `/shaping` | 0 / 20 | 31,463 / 8,311 |
+| `/vgpu` | 0 / 20 | 35,331 / 9,599 |
+| `/browser` | 0 / 20 | 31,504 / 8,374 |
 
-前轮 root JS 为 28,644 / 6,887；本轮只读适配增加 7,856 JS bytes / 1,740 gzip bytes，
-仍低于 128 KiB gzip 预算。最早仅身份/错误的基线为 1,949 / 802。
-旧单入口声明与现在共享 chunk 的闭包大小不可直接比较。
-空文件 gzip 20 bytes 是压缩格式开销，不是实际适配器。
-consumer 检查包含 root gzip 预算与六个子入口无运行时导出的门禁；
-产物与 `.context` 不提交。未来实现各适配器时才替换相应零运行时门禁并制定真实预算。
+默认 backend/codec/Diff 进入 root 后，root 从 36,500 / 8,627 增至
+214,235 / 51,720，仍低于 128 KiB gzip 预算；六个子入口 runtime 仍为空。
+最早仅身份/错误的基线为 1,949 / 802；旧单入口声明与现在共享 chunk 的闭包
+大小不可直接比较。空文件 gzip 20 bytes 是压缩格式开销，不是实际适配器。
+consumer 检查保留 root gzip 预算与六个子入口无运行时导出；root 的
+“无 native markers”检查改为正向断言 `createHistoryStore` 为运行时导出，
+并在 Node 子进程内执行真实建 store、提交、Diff 与 codec roundtrip 冒烟。
+产物与 `.context` 不提交；未来实现各适配器时才替换相应零运行时门禁并制定真实预算。
 
 ### 此前 P2 阶段记录（非本轮包体结果）
 
@@ -134,3 +136,13 @@ ExperimentalWarning；不是生产库或产品运行时要求，生产 Node ESM 
 或声称 GPU 绘制通过，供应商文档/能力与资产审查仍留给真实适配器实施阶段。
 上表由 `pnpm build` 后的 `pnpm measure:package` 实测，consumer 检查 root 仍无 native
 markers/外部依赖、六个子入口仍无 runtime exports。内核活性控制尚未入公开 root。
+
+### 默认 backend、codec、defer 与 Diff
+
+默认工厂/codec/defer/pin/位置导出/Diff 无新增依赖或工具升级。严格 UTF-8 解码、
+规范 JSON 比较与字节信封均为本库 ES-only 实现；Diff 的 grapheme intraline
+marks 使用平台 `Intl.Segmenter`（ES2022 lib / 运行时 ICU），只影响展示细分，
+不进入结构化范围、身份或 codec 语义，其 Unicode 版本随宿主 ICU，
+记录为平台设施而非包依赖。manifest、lock、工具版本与七入口 export map 未改；
+root 的 runtime 导出按用户确认扩展（D13）。上节表格为本轮 `pnpm build` 后的
+实测；这不代表浏览器/LSP/GPU 资产的体积验收。

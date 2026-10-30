@@ -4,6 +4,7 @@ import type {
 import { EditorError } from "../errors.js";
 import { documentId, revisionId, type DocumentId, type RevisionId } from "../identity.js";
 import { scalarUtf8Length, TextIndex } from "../coordinates/text-index.js";
+import { checkElementId, checkRootId } from "../history/identity.js";
 import { TextRope } from "../text/rope.js";
 
 /** Internal materialization boundary; not a persistent or public wire layout. */
@@ -230,4 +231,70 @@ export class SourceRevision {
   translate(point: TextPoint, to: SourceRevision, affinity: Affinity): PositionResolution {
     return to.resolve(this.#capture(this.#sourceScalar(point), affinity));
   }
+}
+
+/** Portable position payload; the codec and cross-store import validate it strictly. */
+export interface SourcePositionPayload {
+  readonly v: 1;
+  readonly document: DocumentId;
+  readonly root: string;
+  readonly guard:
+    | Readonly<{ kind: "start" }>
+    | Readonly<{ kind: "end" }>
+    | Readonly<{ kind: "element"; id: string }>;
+  readonly affinity: Affinity;
+}
+
+/** Read the validated cut of a position issued by any SourceRevision; not a byte decoder. */
+export function readSourcePosition(position: StablePosition): SourcePositionPayload {
+  const cut = cuts.get(position);
+  if (!cut) {
+    throw new EditorError("INVALID_REFERENCE", "INVALID_REFERENCE: position was not issued by a source revision");
+  }
+  return Object.freeze({
+    v: 1 as const, document: cut.document, root: cut.root, guard: cut.guard, affinity: cut.affinity,
+  });
+}
+
+function invalidPayload(message: string): never {
+  throw new EditorError("INVALID_REFERENCE", `INVALID_REFERENCE: ${message}`);
+}
+
+/**
+ * Strictly reconstruct a position from a validated payload. A pure decoder: it
+ * never writes to any store, and every field is checked, including the
+ * element/root identity shapes. Payload provenance is the caller's responsibility.
+ */
+export function restoreSourcePosition(input: unknown): StablePosition {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) invalidPayload("malformed position payload");
+  const record = input as Record<string, unknown>;
+  if (Object.keys(record).sort().join(",") !== "affinity,document,guard,root,v") {
+    invalidPayload("unexpected position payload fields");
+  }
+  const version = record.v;
+  if (typeof version !== "number" || !Number.isInteger(version)) invalidPayload("position payload version");
+  if (version !== 1) throw new EditorError("UNSUPPORTED_FORMAT", "UNSUPPORTED_FORMAT: unsupported position format version");
+  const document = documentId(record.document as string);
+  const root = record.root;
+  if (typeof root !== "string") invalidPayload("position root");
+  checkRootId(root);
+  const affinity = record.affinity;
+  if (affinity !== "before" && affinity !== "after") invalidPayload("position affinity");
+  const guard = record.guard;
+  if (guard === null || typeof guard !== "object" || Array.isArray(guard)) invalidPayload("position guard");
+  const guardRecord = guard as Record<string, unknown>;
+  let rebuilt: Guard;
+  if (guardRecord.kind === "start" || guardRecord.kind === "end") {
+    if (Object.keys(guardRecord).length !== 1) invalidPayload("sentinel guard fields");
+    rebuilt = Object.freeze({ kind: guardRecord.kind });
+  } else if (guardRecord.kind === "element") {
+    if (Object.keys(guardRecord).sort().join(",") !== "id,kind") invalidPayload("element guard fields");
+    const id = guardRecord.id;
+    if (typeof id !== "string") invalidPayload("element guard identity");
+    checkElementId(id);
+    rebuilt = Object.freeze({ kind: "element", id });
+  } else invalidPayload("position guard kind");
+  const position = Object.freeze({}) as StablePosition;
+  cuts.set(position, Object.freeze({ document, root, guard: rebuilt, affinity }));
+  return position;
 }

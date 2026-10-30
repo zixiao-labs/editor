@@ -119,9 +119,9 @@ merge 仍允许 group-closed 文档子集，checkout 仍要求完整且相同的
 manifest；不能把 multi-member group 拆开后重新解释。若祖先跨文档，即使最新事务是
 singleton，其目标仍需通过带齐版本集合的 bundle 表达。
 
-这些方法不实现公开 opaque bundle、byte decoder、版本协商、defer/pending、异步 pin、
-网络协议或持久 ACK。接收方先登记 root；不会从不受信输入自动创建文档。
-未来 codec 必须把版本头/编码开销计入预算，并单独做坏字节、内存与 pending 限额验收。
+这些内部方法自身不做网络协议或持久 ACK；默认 backend 已把它们接到公开字节 codec
+与 defer 队列（API D13：坏字节、内存与 pending 限额验收在那里执行）。接收方先登记
+root；不会从不受信输入自动创建文档。
 
 ## 6. 验证与剩余边界
 
@@ -139,14 +139,15 @@ singleton，其目标仍需通过带齐版本集合的 bundle 表达。
   不把单事务 shrinker 冒充能安全缩减 saved-checkpoint 索引的状态机 reducer。
 
 当前 group/因果校验仍会扫描保留历史与闭包，不宣称整笔 commit O(log n)，也没有完整
-大历史墙钟/内存基准。session undo 栈/公开 native undo port、wire codec/defer、pin/位置导出、
-Diff/公开工厂和真实 browser/IME/多进程网络仍待后续独立验收。
+大历史墙钟/内存基准。wire codec/defer、pin/位置导出、Diff 与公开工厂已在后续轮完成；
+session undo 栈/公开 native undo port 和真实 browser/IME/多进程网络仍待后续独立验收。
 
 ## 7. 默认 native group 活性寄存器
 
 本节只约束默认后端内核，不要求产品后端采用 generation、delete tags 或 FugueMax。
-公开的 `HistoryUndoProvider` 仍是 opaque capture/apply 端口；当前未把缺 codec/Diff 等能力的
-内部 store 冒充完整 native provider，也未实现 session 分组、redo 栈或选区恢复。
+公开的 `HistoryUndoProvider` 仍是 opaque capture/apply 端口；默认 native provider
+已发布（D13）但 `selectiveUndo` 声明为 false，未把缺该能力的 store 冒充 undo provider；
+session 分组、redo 栈与选区恢复仍未实现。
 
 ### revision-local 规则
 

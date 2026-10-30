@@ -19,7 +19,35 @@ test("native Node ESM import never touches DOM or the network", () => {
     globalThis.fetch = () => { throw new Error("unexpected network access"); };
     const api = await import("@zixiao-labs/editor");
     if (api.documentId("node-smoke") !== "node-smoke") throw new Error("bad export");
-    if ("createHistoryStore" in api) throw new Error("unimplemented core factory");
+    const store = api.createHistoryStore({ random: { fill(fill) { fill.fill(7); } } });
+    const document = api.documentId("node-smoke:document");
+    const externalBase = api.externalBaseId("node-smoke:base");
+    const initial = store.createDocument({ id: document, base: { id: externalBase, text: "AB" } });
+    const writer = store.openWriter({ actor: api.actorId("node:actor"), replica: api.replicaId("node:replica") });
+    const head = store.fork({ at: store.revisions([initial]), writer });
+    const before = head.snapshot(document);
+    const change = head.commit({
+      expect: head.checkpoint(),
+      edits: [{ document, range: before.rangeUtf16(1, 1), text: "😀" }],
+      origin: { kind: "consumer-smoke" },
+    });
+    before.dispose();
+    const after = head.snapshot(document);
+    if (after.text() !== "A😀B") throw new Error("commit did not apply");
+    after.dispose();
+    const report = await store.diff({ change });
+    if (!api.formatUnifiedDiff(report).includes("+A😀B")) throw new Error("unified diff missing insertion");
+    const bundle = store.exportHistory({ target: change.after.revisions, known: store.revisions([]) });
+    const bytes = api.encodeHistoryBundle(bundle);
+    const receiver = api.createHistoryStore({ random: { fill(fill) { fill.fill(9); } } });
+    receiver.createDocument({ id: document, base: { id: externalBase, text: "AB" } });
+    const imported = receiver.importHistory(api.decodeHistoryBundle(bytes));
+    if (imported.status !== "accepted") throw new Error("bundle import failed");
+    const converged = receiver.snapshot({ document, revision: imported.availableRevisions.get(document) });
+    if (converged.text() !== "A😀B") throw new Error("imported text differs");
+    converged.dispose();
+    receiver.dispose();
+    head.dispose(); writer.dispose(); store.dispose();
     const backend = api.defineHistoryBackend({
       descriptor: {
         id: api.historyBackendId("consumer:custom"), contractVersion: 1, algorithm: "product/v1",
@@ -81,6 +109,7 @@ test("every declared public entry has built ESM and declarations with no undecla
     // Parse static dependencies instead of mistaking error strings ending in
     // "import" for syntax. Dynamic loading remains prohibited in these entries.
     expect(/\b(?:import|require)\s*\(/u.test(code)).toBe(false);
-    if (entry.import === "./dist/index.js") expect(/FugueSequence|NativeStore|TextRope|SumTree/u.test(code)).toBe(false);
+    // The default native backend is a real runtime export of the root entry.
+    if (entry.import === "./dist/index.js") expect(code).toContain("createHistoryStore");
   }
 });

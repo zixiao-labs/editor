@@ -17,7 +17,7 @@ const supplemental = {
     "SelectionId", "SelectionVersion", "SavedSelections", "SelectionRestoreResult",
     "SelectionChangeEvent", "EditorSession", "MultiBuffer", "CancellationSignal",
     "ExcerptSpec", "ProjectionDecoration",
-    "HistoryBackendDescriptor", "HistoryUndoProvider",
+    "HistoryBackendDescriptor", "HistoryUndoProvider", "HistoryImportEvent", "HistoryPendingId",
   ],
   Collaboration: [
     "HistorySyncPort", "HistorySyncOffer", "HistoryOfferDescriptor", "PeerKnowledge",
@@ -42,6 +42,8 @@ const factories = {
   mountVgpuView: "Vgpu.VgpuFactories",
   mountVgpuDiffView: "Vgpu.VgpuFactories",
 } as const;
+// Runtime functions declared by the document itself, outside the factory contracts.
+const runtimeExports = new Set(["encodeHistoryBundle", "decodeHistoryBundle", "encodePositionToken", "decodePositionToken"]);
 
 function fixture(code: string, dom: boolean): string {
   const declarations = new Set(
@@ -71,6 +73,14 @@ function fixture(code: string, dom: boolean): string {
     const owner = ["RpcTransport"].includes(name) ? "Lsp" :
       ["HistorySyncPort", "HistorySyncOffer"].includes(name) ? "Collaboration" : "Core";
     if (name in factories) continue;
+    if (runtimeExports.has(name)) {
+      checks.push(
+        `declare const actual_${name}: typeof ${owner}.${name};`,
+        `const forward_${name}: typeof ${name} = actual_${name};`,
+        `const reverse_${name}: typeof actual_${name} = ${name};`,
+      );
+      continue;
+    }
     checks.push(
       `declare const actual_${name}: ${owner}.${name};`,
       `const forward_${name}: ${name} = actual_${name};`,
